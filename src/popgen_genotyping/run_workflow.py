@@ -13,7 +13,6 @@ from argparse import ArgumentParser
 
 from cpg_flow.workflow import run_workflow
 
-# TODO(you) import your own Stages
 from workflow_name.stages import DoSomethingGenericWithBash, PrintPreviousJobOutputInAPythonJob
 
 

@@ -1,14 +1,13 @@
 [build-system]
-requires = ["setuptools"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling >= 1.26"]
+build-backend = "hatchling.build"
 
 [project]
-# TODO(you): update this to reflect the project's name & description
-name='workflow_name'
-description='Template workflow'
+name='popgen_genotyping'
+description='Genotyping microarray pipeline using CPG Flow'
 readme = "README.md"
 # currently cpg-flow is pinned to this version
-requires-python = ">=3.10,<3.11"
+requires-python = ">=3.10,<3.12"
 version='0.1.0'
 license={ "file" = "LICENSE" }
 classifiers=[
@@ -21,18 +20,21 @@ classifiers=[
     'Topic :: Scientific/Engineering :: Bio-Informatics',
 ]
 
+# TODO Audit these dependencies later, lifted from
+# Harper's temp_large_cohort_migration
 dependencies=[
-    'cpg-flow>=v0.1.2',
+    'cpg-flow>=v1.0.1',
+    'loguru',
+    'pydantic>=2.12',
 ]
 
 [project.urls]
-# TODO(you): update this to reflect the project's official homepage
-Repository = "https://github.com/populationgenomics/workflow_name"
+Repository = "https://github.com/populationgenomics/popgen-genotyping"
 
 [project.optional-dependencies]
 # various requirements when running cpg-flow/analysis-runner
 cpg = [
-    'cpg-flow>=v0.1.2',
+    'cpg-flow>=v1.0.1',
 ]
 test = [
     'bump2version',
@@ -41,25 +43,17 @@ test = [
 ]
 
 [project.scripts]
-# home for any scripts which will be installed
-# e.g. this minimal "Hello, World!" script which can be run by alias when this package is installed
-# $ say_hello
-# >> Hello, World!
-# $ say_hello cpg-flow
-# >> Hello, cpg-flow!
-say_hello = 'workflow_name.scripts.hello_world:cli_main'
-
 # the workflow runner script - entrypoint for the pipeline
-run_workflow = 'workflow_name.run_workflow:cli_main'
+run_workflow = 'popgen_genotyping.run_workflow:cli_main'
 
-[tool.setuptools]
-package-dir = {"" = "src"}
+[tool.hatch.build.targets.wheel]
+packages = ["src/popgen_genotyping"]
 
-[options]
-include_package_data = true
+[tool.hatch.build.targets.wheel.sources]
+"src" = ""
 
-[options.package_data]
-'workflow_name'=  ['config_template.toml']
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.black]
 line-length = 120
