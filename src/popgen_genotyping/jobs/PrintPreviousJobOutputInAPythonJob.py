@@ -2,7 +2,7 @@
 trivially simple python job example, using a utility constant
 """
 
-from workflow_name.utils import DATE_STRING
+from popgen_genotyping.utils import DATE_STRING
 
 
 def print_file_contents(input_file: str) -> str:

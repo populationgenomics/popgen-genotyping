@@ -13,7 +13,7 @@ from argparse import ArgumentParser
 
 from cpg_flow.workflow import run_workflow
 
-from workflow_name.stages import DoSomethingGenericWithBash, PrintPreviousJobOutputInAPythonJob
+from popgen_genotyping.stages import DoSomethingGenericWithBash, PrintPreviousJobOutputInAPythonJob
 
 
 def cli_main():

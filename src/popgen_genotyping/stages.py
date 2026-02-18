@@ -23,8 +23,8 @@ Each Stage should be a Class, and should inherit from one of
 
 from typing import TYPE_CHECKING
 
-from workflow_name.jobs.DoSomethingGenericWithBash import echo_statement_to_file
-from workflow_name.jobs.PrintPreviousJobOutputInAPythonJob import print_file_contents
+from popgen_genotyping.jobs.DoSomethingGenericWithBash import echo_statement_to_file
+from popgen_genotyping.jobs.PrintPreviousJobOutputInAPythonJob import print_file_contents
 
 from cpg_utils.config import config_retrieve
 from cpg_utils.hail_batch import get_batch
