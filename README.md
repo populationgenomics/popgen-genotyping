@@ -1,10 +1,9 @@
-# cpg-flow-pipeline-template
-A template repository to use as a base for CPG workflows using the cpg-flow pipeline framework
+# popgen-genotyping
+A pipeline to process genotyping microarray data using CPG Flow and analysis-runner.
 
-## Purpose
+## Abstract
 
-When migrating workflows from production-pipelines, this template respository structure can be used to start with a
-sensible directory structure, and some suggested conventions for naming and placement of files.
+Lorem ipsum.
 
 ```commandline
 src
