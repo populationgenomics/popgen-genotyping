@@ -92,6 +92,6 @@ def run_gtc_to_heavy_vcf(
     )
 
     b.write_output(j.reheadered_bcf.bcf, output_bcf_path)
-    b.write_output(j.reheadered_bcf['bcf.csi'], f'{output_bcf_path}.csi')
+    b.write_output(j.reheadered_bcf.csi, f'{output_bcf_path}.csi')
 
     return j
