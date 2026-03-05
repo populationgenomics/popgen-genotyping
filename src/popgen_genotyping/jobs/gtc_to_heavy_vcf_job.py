@@ -1,9 +1,5 @@
 """
 Convert GTC to VCF.
-
-Convert a single GTC sample to VCF retaining array intensities, reheader it with
-correct sample names then index using bcttools.
-TODO add can_reuse logic
 """
 
 from typing import TYPE_CHECKING
@@ -42,11 +38,11 @@ def run_gtc_to_heavy_vcf(
     b = get_batch()
     j = b.new_job(name=job_name)
 
-    j.image(config_retrieve(['workflow', 'driver_image']))  # TODO set correct image
+    j.image(config_retrieve(['workflow', 'driver_image']))
 
-    j.cpu(config_retrieve(['gtc_to_heavy_vcf_job', 'cpu'], 2))
-    j.memory(config_retrieve(['gtc_to_heavy_vcf_job', 'memory'], 'standard'))  # or 'highmem'
-    j.storage(config_retrieve(['gtc_to_heavy_vcf_job', 'storage'], '50G'))  # TODO check minimum storage
+    j.cpu(config_retrieve(['popgen_genotyping', 'gtc_to_heavy_vcf', 'cpu'], 2))
+    j.memory(config_retrieve(['popgen_genotyping', 'gtc_to_heavy_vcf', 'memory'], 'standard'))
+    j.storage(config_retrieve(['popgen_genotyping', 'gtc_to_heavy_vcf', 'storage'], '50G'))
 
     # Read inputs into local env
     gtc_file = b.read_input(gtc_path)
@@ -60,12 +56,10 @@ def run_gtc_to_heavy_vcf(
     j.declare_resource_group(
         reheadered_bcf={
             'bcf': '{root}.bcf',
-            'csi': '{root}.bcf.csi',
+            'bcf.csi': '{root}.bcf.csi',
         }
     )
 
-    # TODO idmappings file approach
-    # TODO fix resource group logic
     j.command(
         f"""
         set -ex
@@ -91,7 +85,6 @@ def run_gtc_to_heavy_vcf(
         """
     )
 
-    b.write_output(j.reheadered_bcf.bcf, output_bcf_path)
-    b.write_output(j.reheadered_bcf.csi, f'{output_bcf_path}.csi')
+    b.write_output(j.reheadered_bcf, output_bcf_path.replace('.bcf', ''))
 
     return j

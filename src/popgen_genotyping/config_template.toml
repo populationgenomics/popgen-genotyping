@@ -6,12 +6,30 @@
 name = 'popgen_genotyping'
 
 # mandatory fields for cpg-flow, not populated by analysis-runner
-# TODO(you): update this to contain a real cohort for the given sequencing type
+dataset = 'ourdna'
 input_cohorts = []
-sequencing_type = 'genome'
+sequencing_type = 'array'
 
 # used to make sure we don't repeat previously completed stages
 check_expected_outputs = true
 
 # the method to register outputs, can be missing - will not generate metamist analysis entries
 status_reporter = 'metamist'
+
+driver_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/cpg_flow:latest'
+version = 'v1'
+
+[popgen_genotyping.gtc_to_heavy_vcf]
+cpu = 2
+memory = 'standard'
+storage = '50G'
+
+[popgen_genotyping.bafregress]
+cpu = 1
+memory = 'standard'
+storage = '10G'
+
+[popgen_genotyping.references]
+fasta_ref_path = 'gs://cpg-common-main/references/hg38/v0/Homo_sapiens_assembly38.fasta'
+bpm_manifest_path = 'gs://...'
+egt_cluster_path = 'gs://...'

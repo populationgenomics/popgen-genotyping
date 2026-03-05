@@ -25,11 +25,11 @@ def run_bafregress(
     b = get_batch()
     j = b.new_job(name=job_name)
 
-    j.image(config_retrieve(['workflow', 'driver_image']))  # TODO confirm image
+    j.image(config_retrieve(['workflow', 'driver_image']))
 
-    j.cpu(config_retrieve(['bafregress_job', 'cpu'], 1))
-    j.memory(config_retrieve(['bafregress_job', 'memory'], 'standard'))
-    j.storage(config_retrieve(['bafregress_job', 'storage'], '10G'))
+    j.cpu(config_retrieve(['popgen_genotyping', 'bafregress', 'cpu'], 1))
+    j.memory(config_retrieve(['popgen_genotyping', 'bafregress', 'memory'], 'standard'))
+    j.storage(config_retrieve(['popgen_genotyping', 'bafregress', 'storage'], '10G'))
 
     # Read the input BCF file.
     bcf_file = b.read_input(bcf_path)

@@ -1,97 +1,128 @@
 """
 This file exists to define all the Stages for the workflow.
-The logic for each stage can be contained here (if it is not too complex),
-or can be delegated to a separate file in jobs.
-
-Naming conventions for Stages are not enforced, but a series of recommendations have been made here:
-
-https://cpg-populationanalysis.atlassian.net/wiki/spaces/ST/pages/185597962/Pipeline+Naming+Convention+Specification
-
-A suggested naming convention for a stages is:
-  - PascalCase (each word capitalized, no hyphens or underscores)
-  - If the phrase contains an initialism (e.g. VCF), only the first character should be capitalised
-  - Verb + Subject (noun) + Preposition + Direct Object (noun)  TODO(anyone): please correct my grammar is this is false
-  e.g. AlignShortReadsWithBowtie2, or MakeSitesOnlyVcfWithBcftools
-  - This becomes self-explanatory when reading the code and output folders
-
-Each Stage should be a Class, and should inherit from one of
-  - SequencingGroupStage
-  - DatasetStage
-  - CohortStage
-  - MultiCohortStage
 """
 
 from typing import TYPE_CHECKING
 
-from popgen_genotyping.jobs.DoSomethingGenericWithBash import echo_statement_to_file
-from popgen_genotyping.jobs.PrintPreviousJobOutputInAPythonJob import print_file_contents
+from popgen_genotyping.jobs.gtc_to_heavy_vcf_job import run_gtc_to_heavy_vcf
+from popgen_genotyping.jobs.bafregress_job import run_bafregress
+from popgen_genotyping.jobs.heavy_to_light_vcf_job import run_heavy_to_light_vcf
+from popgen_genotyping.utils import get_output_prefix
 
 from cpg_utils.config import config_retrieve
-from cpg_utils.hail_batch import get_batch
-
-from cpg_flow.stage import MultiCohortStage, stage
+from cpg_flow.workflow import get_workflow
+from cpg_flow.stage import SequencingGroupStage, stage
 
 if TYPE_CHECKING:
-    # Path is a classic return type for a Stage, and is a shortcut for [CloudPath | pathlib.Path]
     from cpg_utils import Path
-    from cpg_flow.targets import MultiCohort, StageInput, StageOutput
+    from cpg_flow.targets import SequencingGroup, StageInput, StageOutput
 
 
 @stage()
-class DoSomethingGenericWithBash(MultiCohortStage):
+class GtcToHeavyVcf(SequencingGroupStage):
     """
-    This is a generic stage that runs a bash command.
-    """
-
-    def expected_outputs(self, multicohort: 'MultiCohort') -> 'Path':
-        """
-        This is where we define the expected outputs for this stage.
-        """
-        # self.prefix() is a more concise shortcut for multicohort.analysis_dataset_bucket/ StageName / Hash
-        return multicohort.analysis_dataset.prefix(category='tmp') / self.name / 'output.txt'
-
-    def queue_jobs(self, multicohort: 'MultiCohort', inputs: 'StageInput') -> 'StageOutput':  # noqa: ARG002
-        """
-        This is where we generate jobs for this stage.
-        """
-
-        # locate the intended output path
-        outputs = self.expected_outputs(multicohort)
-
-        # generate the output
-        j = echo_statement_to_file('Hello World!', str(outputs))
-
-        # return the jobs and outputs
-        return self.make_outputs(multicohort, data=outputs, jobs=j)
-
-
-@stage(required_stages=[DoSomethingGenericWithBash])
-class PrintPreviousJobOutputInAPythonJob(MultiCohortStage):
-    """
-    This is a stage that cats the output of a previous stage to the logs.
-    This uses a method imported from a job file, run as a PythonJob.
+    Convert GTC to VCF.
     """
 
-    def expected_outputs(self, multicohort: 'MultiCohort') -> 'Path':
-        return multicohort.analysis_dataset.prefix(category='tmp') / self.name / 'cat.txt'
+    def expected_outputs(self, sequencing_group: 'SequencingGroup') -> 'Path':
+        """
+        Expected outputs for this stage.
+        """
+        return get_output_prefix(sequencing_group.dataset, self.name, tmp=True) / f'{sequencing_group.id}.bcf'
 
-    def queue_jobs(self, multicohort: 'MultiCohort', inputs: 'StageInput') -> 'StageOutput':
-        # get the previous stage's output
-        previous_stage = inputs.as_str(multicohort, DoSomethingGenericWithBash)
+    def queue_jobs(self, sequencing_group: 'SequencingGroup', inputs: 'StageInput') -> 'StageOutput':  # noqa: ARG002
+        """
+        Queue jobs for this stage.
+        """
+        outputs = self.expected_outputs(sequencing_group)
 
-        # localise the file
-        local_input = get_batch().read_input(previous_stage)
+        # Retrieve reference paths from config
+        fasta_ref_path = config_retrieve(['popgen_genotyping', 'references', 'fasta_ref_path'])
+        bpm_manifest_path = config_retrieve(['popgen_genotyping', 'references', 'bpm_manifest_path'])
+        egt_cluster_path = config_retrieve(['popgen_genotyping', 'references', 'egt_cluster_path'])
 
-        # generate the expected output path
-        outputs = self.expected_outputs(multicohort)
+        # TODO: Retrieve actual GTC and ID mapping paths from Metamist or metadata
+        # Mocking for now
+        gtc_path = f'gs://cpg-popgen-main/gtc/{sequencing_group.id}.gtc'
+        id_mappings_path = f'gs://cpg-popgen-main/metadata/{sequencing_group.id}_id_map.txt'
 
-        # run the PythonJob
-        job = get_batch().new_python_job(f'Read {previous_stage}')
-        job.image(config_retrieve(['workflow', 'driver_image']))
-        pyjob_output = job.call(
-            print_file_contents,
-            local_input,
+        j = run_gtc_to_heavy_vcf(
+            gtc_path=gtc_path,
+            id_mappings_path=id_mappings_path,
+            output_bcf_path=str(outputs),
+            bpm_manifest_path=bpm_manifest_path,
+            egt_cluster_path=egt_cluster_path,
+            fasta_ref_path=fasta_ref_path,
+            job_name=f'GtcToHeavyVcf_{sequencing_group.id}',
         )
-        get_batch().write_output(pyjob_output.as_str(), str(outputs))
 
-        return self.make_outputs(multicohort, data=outputs, jobs=job)
+        return self.make_outputs(sequencing_group, data=outputs, jobs=[j])
+
+
+@stage(required_stages=[GtcToHeavyVcf])
+class BafRegress(SequencingGroupStage):
+    """
+    Run BAFRegress on a BCF file to estimate sample contamination.
+    """
+
+    def expected_outputs(self, sequencing_group: 'SequencingGroup') -> 'Path':
+        """
+        Expected outputs for this stage.
+        """
+        return get_output_prefix(sequencing_group.dataset, self.name) / f'{sequencing_group.id}.BAFRegress.txt'
+
+    def queue_jobs(self, sequencing_group: 'SequencingGroup', inputs: 'StageInput') -> 'StageOutput':
+        """
+        Queue jobs for this stage.
+        """
+        outputs = self.expected_outputs(sequencing_group)
+
+        # Get the previous stage's output
+        bcf_path = inputs.as_path(sequencing_group, GtcToHeavyVcf)
+
+        j = run_bafregress(
+            bcf_path=str(bcf_path),
+            output_path=str(outputs),
+            job_name=f'BafRegress_{sequencing_group.id}',
+        )
+
+        return self.make_outputs(sequencing_group, data=outputs, jobs=[j])
+
+
+@stage(required_stages=[GtcToHeavyVcf])
+class HeavyToLightVcf(SequencingGroupStage):
+    """
+    Strip intensities and FORMAT fields from a heavy BCF to produce a light BCF.
+    """
+
+    def expected_outputs(self, sequencing_group: 'SequencingGroup') -> 'Path':
+        """
+        Expected outputs for this stage.
+        """
+        return get_output_prefix(sequencing_group.dataset, self.name, tmp=True) / f'{sequencing_group.id}.bcf'
+
+    def queue_jobs(self, sequencing_group: 'SequencingGroup', inputs: 'StageInput') -> 'StageOutput':
+        """
+        Queue jobs for this stage.
+        """
+        outputs = self.expected_outputs(sequencing_group)
+
+        # Retrieve reference paths from config
+        fasta_ref_path = config_retrieve(['popgen_genotyping', 'references', 'fasta_ref_path'])
+
+        # Get the previous stage's output
+        heavy_bcf_path = inputs.as_path(sequencing_group, GtcToHeavyVcf)
+
+        # TODO: Retrieve actual ID mapping path from Metamist or metadata
+        # Mocking for now
+        id_mappings_path = f'gs://cpg-popgen-main/metadata/{sequencing_group.id}_id_map.txt'
+
+        j = run_heavy_to_light_vcf(
+            input_bcf_path=str(heavy_bcf_path),
+            id_mappings_path=id_mappings_path,
+            output_bcf_path=str(outputs),
+            fasta_ref_path=fasta_ref_path,
+            job_name=f'HeavyToLightVcf_{sequencing_group.id}',
+        )
+
+        return self.make_outputs(sequencing_group, data=outputs, jobs=[j])
