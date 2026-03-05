@@ -10,7 +10,7 @@ from cpg_flow.workflow import get_workflow
 
 if TYPE_CHECKING:
     from cpg_utils import Path
-    from cpg_flow.targets import SequencingGroup, Dataset, Cohort
+    from cpg_flow.targets import Dataset
 
 DATE_STRING: str = datetime.now().strftime('%y-%m')  # noqa: DTZ005
 

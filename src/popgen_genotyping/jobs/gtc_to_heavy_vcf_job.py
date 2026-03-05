@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 def run_gtc_to_heavy_vcf(
     gtc_path: str,
-    id_mappings_path: str,
+    sample_id: str,
     output_bcf_path: str,
     bpm_manifest_path: str,
     egt_cluster_path: str,
@@ -24,7 +24,7 @@ def run_gtc_to_heavy_vcf(
 
     Args:
         gtc_path (str): Cloud path to the input GTC file.
-        id_mappings_path (str): Cloud path to the id_mappings.txt file for reheadering.
+        sample_id (str): Sample ID for the GTC file.
         output_bcf_path (str): Cloud path for the final output BCF file.
         bpm_manifest_path (str): Cloud path to the BPM manifest file.
         egt_cluster_path (str): Cloud path to the EGT cluster file.
@@ -46,7 +46,6 @@ def run_gtc_to_heavy_vcf(
 
     # Read inputs into local env
     gtc_file = b.read_input(gtc_path)
-    id_mappings_file = b.read_input(id_mappings_path)
     bpm_manifest_file = b.read_input(bpm_manifest_path)
     egt_cluster_file = b.read_input(egt_cluster_path)
 
@@ -65,23 +64,18 @@ def run_gtc_to_heavy_vcf(
         set -ex
 
         bcftools +gtc2vcf \\
-            --no-version -Ou \\
+            --no-version \\
             --bpm {bpm_manifest_file} \\
             --egt {egt_cluster_file} \\
             --fasta-ref {ref_fasta.base} \\
             --extra temp_vcf.tsv | \\
             {gtc_file} | \\
-        bcftools sort -Ou -T ./bcftools-sort-tmp.dir | \\
-        bcftools norm --no-version -o raw.bcf -Ob -c x -f {ref_fasta.base} --write-index
-
-        # Reheader with new sample IDs
+        bcftools sort -T ./bcftools-sort-tmp.dir | \\
+        bcftools norm --no-version -c x -f {ref_fasta.base} | \\
         bcftools reheader \\
-            -s {id_mappings_file} \\
+            -n {sample_id} \\
             raw.bcf \\
-            -o {j.reheadered_bcf.bcf}
-
-        # Index the final re-headered BCF file
-        bcftools index {j.reheadered_bcf.bcf}
+            -o {j.reheadered_bcf.bcf} --write-index
         """
     )
 

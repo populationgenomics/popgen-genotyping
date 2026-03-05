@@ -13,7 +13,6 @@ if TYPE_CHECKING:
 
 def run_heavy_to_light_vcf(
     input_bcf_path: str,
-    id_mappings_path: str,
     output_bcf_path: str,
     fasta_ref_path: str,
     job_name: str = 'heavy_to_light_vcf',
@@ -42,11 +41,7 @@ def run_heavy_to_light_vcf(
     j.storage(config_retrieve(['popgen_genotyping', 'heavy_to_light_vcf', 'storage'], '10G'))
 
     # Read inputs
-    input_bcf = b.read_input_group(
-        bcf=input_bcf_path,
-        csi=f'{input_bcf_path}.csi'
-    )
-    id_map = b.read_input(id_mappings_path)
+    input_bcf = b.read_input_group(bcf=input_bcf_path, csi=f'{input_bcf_path}.csi')
     ref_fasta = b.read_input_group(base=fasta_ref_path, fai=f'{fasta_ref_path}.fai')
 
     j.declare_resource_group(
@@ -69,11 +64,7 @@ def run_heavy_to_light_vcf(
 
         bcftools annotate -x ^FORMAT/GT,FORMAT/GQ -Ou {input_bcf.bcf} | \\
         bcftools sort -Ou -T /dev/shm/bcftools-tmp | \\
-        bcftools norm --no-version -c x -f {ref_fasta.base} -Ou | \\
-        bcftools reheader -s {id_map} -o {j.light_bcf.bcf} --write-index
-
-        # Ensure index has the correct extension for Hail Batch to recognize it
-        # bcftools reheader --write-index creates .bcf.csi
+        bcftools norm --no-version -c x -f {ref_fasta.base} -Ou --write-index
         """
     )
 
