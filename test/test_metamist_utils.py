@@ -1,72 +1,82 @@
 """
-Tests for metamist_utils module.
+Tests for metamist_utils.py.
 """
 
-from unittest.mock import patch, MagicMock
-from popgen_genotyping.metamist_utils import query_reported_sex
+from unittest.mock import patch
+import pytest
+from popgen_genotyping.metamist_utils import query_genotyping_manifests, parse_genotyping_manifest
+from popgen_genotyping.scripts.generate_synthetic_manifest import generate_manifest
 
 
-def test_query_reported_sex_parsing():
+@pytest.fixture
+def synthetic_manifest(tmp_path):
     """
-    Test that query_reported_sex correctly parses the nested Metamist response.
+    Fixture to generate a synthetic manifest CSV for testing.
     """
-    mock_response = {
+    manifest_path = tmp_path / 'genotyping_array_manifest.csv'
+    generate_manifest(manifest_path, num_samples=3, prefix='CPGSYN')
+    return manifest_path
+
+
+@patch('popgen_genotyping.metamist_utils.query')
+@patch('popgen_genotyping.metamist_utils.config_retrieve')
+def test_query_genotyping_manifests(mock_config, mock_query):
+    # Mock config
+    mock_config.return_value = 'ourdna'
+
+    # Mock GraphQL response
+    mock_query.return_value = {
         'project': {
-            'sequencingGroups': [
+            'analyses': [
                 {
-                    'id': 'CPG001',
-                    'sample': {
-                        'participant': {
-                            'reportedSex': 'Female'
-                        }
+                    'type': 'manifest',
+                    'outputs': {
+                        'id': 224611,
+                        'path': 'gs://cpg-ourdna-main/manifests/production_manifests/COH8495_production_manifest.csv',
+                        'basename': 'COH8495_production_manifest.csv'
                     }
                 },
                 {
-                    'id': 'CPG002',
-                    'sample': {
-                        'participant': {
-                            'reportedSex': 'Male'
-                        }
-                    }
-                },
-                {
-                    'id': 'CPG003',
-                    'sample': None # Test handling of missing sample
-                },
-                {
-                    'id': 'CPG004',
-                    'sample': {
-                        'participant': None # Test handling of missing participant
+                    'type': 'manifest',
+                    'outputs': {
+                        'id': 231239,
+                        'path': 'gs://cpg-ourdna-main/gtc_genotyping_array/manifests/genotyping_array_manifest_cohort_COH10152.csv',
+                        'basename': 'genotyping_array_manifest_cohort_COH10152.csv'
                     }
                 }
             ]
         }
     }
 
-    with patch('popgen_genotyping.metamist_utils.query', return_value=mock_response), \
-         patch('popgen_genotyping.metamist_utils.config_retrieve', return_value='ourdna'):
+    # Execute
+    manifests = query_genotyping_manifests('ourdna')
 
-        result = query_reported_sex()
-
-        assert result == {
-            'CPG001': 'Female',
-            'CPG002': 'Male'
-        }
-        assert len(result) == 2
+    # Verify filtering
+    assert len(manifests) == 1
+    assert manifests[0]['basename'] == 'genotyping_array_manifest_cohort_COH10152.csv'
 
 
-def test_query_reported_sex_empty_response():
-    """
-    Test that query_reported_sex returns an empty dict on empty project or sequencingGroups.
-    """
-    mock_responses = [
-        {'project': None},
-        {'project': {'sequencingGroups': []}}
-    ]
+@patch('popgen_genotyping.metamist_utils.to_path')
+def test_parse_genotyping_manifest(mock_to_path, synthetic_manifest):
+    # Mock to_path to return the path to the synthetic manifest
+    mock_to_path.return_value = synthetic_manifest
 
-    for mock_resp in mock_responses:
-        with patch('popgen_genotyping.metamist_utils.query', return_value=mock_resp), \
-             patch('popgen_genotyping.metamist_utils.config_retrieve', return_value='ourdna'):
+    # Execute
+    mapping = parse_genotyping_manifest(str(synthetic_manifest))
 
-            result = query_reported_sex()
-            assert result == {}
+    # Verify
+    assert mapping == {
+        'CPGSYN001': 'gs://cpg-test-main/gtc/CPGSYN001.gtc',
+        'CPGSYN002': 'gs://cpg-test-main/gtc/CPGSYN002.gtc',
+        'CPGSYN003': 'gs://cpg-test-main/gtc/CPGSYN003.gtc'
+    }
+
+
+@patch('popgen_genotyping.metamist_utils.query')
+@patch('popgen_genotyping.metamist_utils.config_retrieve')
+def test_query_genotyping_manifests_no_results(mock_config, mock_query):
+    mock_config.return_value = 'ourdna'
+    mock_query.return_value = {'project': {'analyses': []}}
+
+    manifests = query_genotyping_manifests('ourdna')
+    assert manifests == []

@@ -6,7 +6,7 @@ This is the main entry point for the workflow.
 
 from argparse import ArgumentParser
 
-from popgen_genotyping.stages import GtcToHeavyBcf, BafRegress, HeavyToLightBcf, CohortBcfToPlink
+from popgen_genotyping.stages import GtcToBcfs, BafRegress, CohortBcfToPlink
 
 from cpg_flow.workflow import run_workflow
 
@@ -21,7 +21,7 @@ def cli_main():
 
     # The workflow name is derived from the package name
     workflow_name = __package__ or 'popgen_genotyping'
-    stages = [GtcToHeavyBcf, BafRegress, HeavyToLightBcf, CohortBcfToPlink]
+    stages = [GtcToBcfs, BafRegress, CohortBcfToPlink]
 
     run_workflow(name=workflow_name, stages=stages, dry_run=args.dry_run)
 

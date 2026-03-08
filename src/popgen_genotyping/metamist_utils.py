@@ -2,7 +2,10 @@
 Metamist GraphQL query utilities for the genotyping pipeline.
 """
 
+import csv
+import functools
 from metamist.graphql import gql, query
+from cpg_utils import to_path
 from cpg_utils.config import config_retrieve
 
 # GQL to retrieve reported sex for active sequencing groups
@@ -22,6 +25,76 @@ QUERY_REPORTED_SEX = gql(
     }
     """
 )
+
+# GQL to retrieve manifest analysis entries
+QUERY_GENOTYPING_MANIFESTS = gql(
+    """
+    query GenotypingManifestQuery($project: String!) {
+      project(name: $project) {
+        analyses(type: {eq: "manifest"}) {
+          type
+          outputs
+        }
+      }
+    }
+    """
+)
+
+
+def query_genotyping_manifests(project: str | None = None) -> list[dict]:
+    """
+    Query Metamist for genotyping manifest analyses.
+
+    Args:
+        project (str, optional): Metamist project name. Defaults to the 'dataset' from config.
+
+    Returns:
+        list[dict]: List of 'outputs' dictionaries from manifest analyses containing 'genotyping_array'.
+    """
+    if project is None:
+        project = config_retrieve(['workflow', 'dataset'])
+
+    # Execute the query
+    query_result = query(QUERY_GENOTYPING_MANIFESTS, {'project': project})
+
+    if not query_result.get('project') or not query_result['project'].get('analyses'):
+        return []
+
+    # Filter for genotyping array manifests
+    manifest_outputs = []
+    for analysis in query_result['project']['analyses']:
+        outputs = analysis.get('outputs')
+        if not outputs or not isinstance(outputs, dict):
+            continue
+
+        basename = outputs.get('basename', '')
+        if 'genotyping_array' in basename:
+            manifest_outputs.append(outputs)
+
+    return manifest_outputs
+
+
+@functools.lru_cache
+def parse_genotyping_manifest(manifest_path: str) -> dict[str, str]:
+    """
+    Read and parse a genotyping manifest CSV.
+
+    Args:
+        manifest_path (str): Cloud path to the manifest CSV.
+
+    Returns:
+        dict[str, str]: Mapping of Sequencing Group ID to GTC filepath.
+    """
+    sg_to_gtc = {}
+    with to_path(manifest_path).open() as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            sg_id = row.get('cpg_sequencing_group_id')
+            gtc_path = row.get('cpg_gcp_filepath')
+            if sg_id and gtc_path:
+                sg_to_gtc[sg_id] = gtc_path
+
+    return sg_to_gtc
 
 
 def query_reported_sex(project: str | None = None) -> dict[str, str]:
