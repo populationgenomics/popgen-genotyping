@@ -4,9 +4,15 @@ Metamist GraphQL query utilities for the genotyping pipeline.
 
 import csv
 import functools
+from typing import TYPE_CHECKING
+
 from metamist.graphql import gql, query
 from cpg_utils import to_path
 from cpg_utils.config import config_retrieve
+from popgen_genotyping.utils import get_sequencing_group_cohort
+
+if TYPE_CHECKING:
+    from cpg_flow.targets import SequencingGroup
 
 # GQL to retrieve reported sex for active sequencing groups
 QUERY_REPORTED_SEX = gql(
@@ -95,6 +101,56 @@ def parse_genotyping_manifest(manifest_path: str) -> dict[str, str]:
                 sg_to_gtc[sg_id] = gtc_path
 
     return sg_to_gtc
+
+
+def resolve_gtc_path(sequencing_group: 'SequencingGroup') -> str:
+    """
+    Resolve the GTC cloud path for a sequencing group from Metamist manifests.
+    
+    Args:
+        sequencing_group (SequencingGroup): The sequencing group to resolve.
+        
+    Returns:
+        str: The cloud path to the GTC file.
+        
+    Raises:
+        ValueError: If no manifest is found or the SG is not in the manifest.
+    """
+    # 1. Query all possible genotyping manifests for the project
+    all_manifests = query_genotyping_manifests(sequencing_group.dataset.name)
+
+    # 2. Resolve the cohort for this sequencing group
+    cohort = get_sequencing_group_cohort(sequencing_group)
+    cohort_id = cohort.id
+
+    # 3. Find manifest with the cohort ID in its basename
+    matching_manifests = [
+        m for m in all_manifests if cohort_id in m.get('basename', '')
+    ]
+
+    if not matching_manifests:
+        raise ValueError(
+            f'No manifest found for cohort {cohort_id} in project {sequencing_group.dataset.name}'
+        )
+
+    # Sort by ID to get the latest if multiple exist for the same cohort
+    matching_manifests.sort(key=lambda x: x.get('id', 0), reverse=True)
+    latest_manifest = matching_manifests[0]
+    manifest_path = latest_manifest.get('path')
+
+    if not manifest_path:
+        raise ValueError(f'Manifest for cohort {cohort_id} has no path output')
+
+    # 4. Parse the chosen manifest and retrieve the path
+    mapping = parse_genotyping_manifest(manifest_path)
+
+    if sequencing_group.id not in mapping:
+        raise ValueError(
+            f'Sequencing group {sequencing_group.id} not found in genotyping manifest '
+            f'{manifest_path}'
+        )
+        
+    return mapping[sequencing_group.id]
 
 
 def query_reported_sex(project: str | None = None) -> dict[str, str]:

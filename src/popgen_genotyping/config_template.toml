@@ -17,6 +17,7 @@ check_expected_outputs = true
 status_reporter = 'metamist'
 
 driver_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/cpg_flow:latest'
+BcfToPlink_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/bcftools_plink:latest'
 version = 'v1'
 
 [popgen_genotyping.gtc_to_heavy_vcf]
