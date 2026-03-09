@@ -11,8 +11,8 @@ from popgen_genotyping.jobs.bafregress_job import run_bafregress
 from popgen_genotyping.jobs.cohort_bcf_to_plink_job import run_cohort_bcf_to_plink
 from popgen_genotyping.jobs.gtc_to_bcfs_job import run_gtc_to_bcfs
 from popgen_genotyping.jobs.merge_plink_job import run_merge_plink
-from popgen_genotyping.metamist_utils import resolve_gtc_path
-from popgen_genotyping.utils import get_output_prefix
+from popgen_genotyping.metamist_utils import resolve_gtc_path, query_previous_aggregate
+from popgen_genotyping.utils import get_output_prefix, parse_psam
 
 if TYPE_CHECKING:
     from cpg_flow.stage import StageInput, StageOutput
@@ -122,7 +122,7 @@ class CohortBcfToPlink(CohortStage):
 @stage(required_stages=[CohortBcfToPlink])
 class MergeCohortPlink(MultiCohortStage):
     """
-    Merge all cohort PLINK2 datasets into a single unified dataset.
+    Merge all cohort PLINK2 datasets into a single unified dataset, with rolling aggregate.
     """
 
     def expected_outputs(self, multicohort: 'MultiCohort') -> dict[str, 'Path']:
@@ -136,23 +136,46 @@ class MergeCohortPlink(MultiCohortStage):
     def queue_jobs(self, multicohort: 'MultiCohort', inputs: 'StageInput') -> 'StageOutput':
         outputs = self.expected_outputs(multicohort)
 
-        # Gather all PLINK2 output paths from CohortBcfToPlink stage
-        # as_dict_by_target for a MultiCohort stage with CohortStage dependencies
-        # returns dict[target_id, outputs]
+        # 1. Gather new cohort outputs
         all_cohort_outputs = inputs.as_dict_by_target(CohortBcfToPlink)
-
         cohort_plink_paths = []
         for _cohort_id, cohort_outs in all_cohort_outputs.items():
-            # cohort_outs is a dict with 'pgen', 'pvar', 'psam'
             cohort_plink_paths.append({
                 'pgen': str(cohort_outs['pgen']),
                 'pvar': str(cohort_outs['pvar']),
                 'psam': str(cohort_outs['psam']),
             })
 
+        # 2. Check for rolling aggregate
+        prev_analysis_id = config_retrieve(
+            ['popgen_genotyping', 'rolling_aggregate', 'previous_analysis_id'],
+            default=None
+        )
+
+        previous_aggregate_paths = None
+        samples_to_remove = None
+
+        if prev_analysis_id:
+            # Query Metamist for the previous analysis
+            prev_outputs, active_sg_ids = query_previous_aggregate(int(prev_analysis_id))
+            previous_aggregate_paths = {
+                'pgen': prev_outputs['pgen'],
+                'pvar': prev_outputs['pvar'],
+                'psam': prev_outputs['psam'],
+            }
+
+            # Parse the previous PSAM to find all samples
+            prev_samples = parse_psam(previous_aggregate_paths['psam'])
+
+            # Find samples that are no longer active
+            samples_to_remove = list(set(prev_samples) - set(active_sg_ids))
+
+        # 3. Call merge job
         j = run_merge_plink(
             cohort_plink_paths=cohort_plink_paths,
             output_prefix=str(outputs['pgen']).replace('.pgen', ''),
+            previous_aggregate_paths=previous_aggregate_paths,
+            samples_to_remove=samples_to_remove,
             job_name='MergeCohortPlink',
         )
 

@@ -4,7 +4,11 @@ Tests for metamist_utils.py.
 
 from unittest.mock import patch
 import pytest
-from popgen_genotyping.metamist_utils import query_genotyping_manifests, parse_genotyping_manifest
+from popgen_genotyping.metamist_utils import (
+    query_genotyping_manifests, 
+    parse_genotyping_manifest,
+    query_previous_aggregate
+)
 from popgen_genotyping.scripts.generate_synthetic_manifest import generate_manifest
 
 
@@ -77,6 +81,29 @@ def test_parse_genotyping_manifest(mock_to_path, synthetic_manifest):
 def test_query_genotyping_manifests_no_results(mock_config, mock_query):
     mock_config.return_value = 'ourdna'
     mock_query.return_value = {'project': {'analyses': []}}
-
+    
     manifests = query_genotyping_manifests('ourdna')
     assert manifests == []
+
+
+@patch('popgen_genotyping.metamist_utils.query')
+def test_query_previous_aggregate(mock_query):
+    mock_query.return_value = {
+        'analyses': [
+            {
+                'outputs': {'pgen': 'gs://path/merged.pgen'},
+                'project': {
+                    'sequencingGroups': [
+                        {'id': 'CPG001'},
+                        {'id': 'CPG002'}
+                    ]
+                }
+            }
+        ]
+    }
+    
+    outputs, active_sgs = query_previous_aggregate(123)
+    
+    assert outputs == {'pgen': 'gs://path/merged.pgen'}
+    assert active_sgs == ['CPG001', 'CPG002']
+    mock_query.assert_called_once()

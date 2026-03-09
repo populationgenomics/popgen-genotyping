@@ -46,6 +46,22 @@ QUERY_GENOTYPING_MANIFESTS = gql(
     """
 )
 
+# GQL to retrieve previous aggregate metadata and active SGs
+QUERY_PREVIOUS_AGGREGATE = gql(
+    """
+    query PreviousAggregateQuery($id: Int!) {
+      analyses(id: {eq: $id}) {
+        outputs
+        project {
+          sequencingGroups(activeOnly: {eq: true}) {
+            id
+          }
+        }
+      }
+    }
+    """
+)
+
 
 def query_genotyping_manifests(project: str | None = None) -> list[dict]:
     """
@@ -151,6 +167,29 @@ def resolve_gtc_path(sequencing_group: 'SequencingGroup') -> str:
         )
 
     return mapping[sequencing_group.id]
+
+
+def query_previous_aggregate(analysis_id: int) -> tuple[dict, list[str]]:
+    """
+    Query Metamist for a previous aggregate analysis and its project's active samples.
+
+    Args:
+        analysis_id (int): The Metamist analysis ID.
+
+    Returns:
+        tuple[dict, list[str]]: (outputs_dict, active_sg_ids)
+    """
+    query_result = query(QUERY_PREVIOUS_AGGREGATE, {'id': analysis_id})
+
+    if not query_result.get('analyses'):
+        raise ValueError(f'Analysis with ID {analysis_id} not found in Metamist')
+
+    analysis = query_result['analyses'][0]
+    outputs = analysis.get('outputs', {})
+    project = analysis.get('project', {})
+    active_sgs = [sg['id'] for sg in project.get('sequencingGroups', [])]
+
+    return outputs, active_sgs
 
 
 def query_reported_sex(project: str | None = None) -> dict[str, str]:

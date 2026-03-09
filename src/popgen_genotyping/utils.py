@@ -3,8 +3,10 @@ suggested location for any utility methods or constants used across multiple sta
 """
 
 from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING
 
+from cpg_utils import to_path
 from cpg_utils.config import config_retrieve
 from cpg_flow.workflow import get_workflow
 from cpg_flow.inputs import get_multicohort
@@ -36,3 +38,30 @@ def get_sequencing_group_cohort(sequencing_group: 'SequencingGroup') -> 'Cohort'
             return cohort
 
     raise ValueError(f'Sequencing group {sequencing_group.id} not found in any cohort')
+
+
+def parse_psam(psam_path: str | Path) -> list[str]:
+    """
+    Extract sequencing group IDs from a PLINK2 .psam file.
+    Expects tab-separated values. Sample IDs are in the first column or #IID/IID.
+    """
+    ids = []
+    with to_path(psam_path).open() as f:
+        # Find header index for IID
+        header = None
+        for line in f:
+            if not line.strip():
+                continue
+            if line.startswith('#'):
+                header = line.lstrip('#').split()
+                iid_idx = header.index('IID') if 'IID' in header else 0
+                continue
+
+            parts = line.split()
+            if header:
+                ids.append(parts[iid_idx])
+            else:
+                # No header found yet, assume first column
+                ids.append(parts[0])
+
+    return ids
