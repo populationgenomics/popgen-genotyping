@@ -106,13 +106,13 @@ def parse_genotyping_manifest(manifest_path: str) -> dict[str, str]:
 def resolve_gtc_path(sequencing_group: 'SequencingGroup') -> str:
     """
     Resolve the GTC cloud path for a sequencing group from Metamist manifests.
-    
+
     Args:
         sequencing_group (SequencingGroup): The sequencing group to resolve.
-        
+
     Returns:
         str: The cloud path to the GTC file.
-        
+
     Raises:
         ValueError: If no manifest is found or the SG is not in the manifest.
     """
@@ -149,7 +149,7 @@ def resolve_gtc_path(sequencing_group: 'SequencingGroup') -> str:
             f'Sequencing group {sequencing_group.id} not found in genotyping manifest '
             f'{manifest_path}'
         )
-        
+
     return mapping[sequencing_group.id]
 
 

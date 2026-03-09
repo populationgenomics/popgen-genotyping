@@ -4,18 +4,19 @@ This file exists to define all the Stages for the workflow.
 
 from typing import TYPE_CHECKING
 
-from cpg_flow.stage import CohortStage, SequencingGroupStage, stage
+from cpg_flow.stage import CohortStage, MultiCohortStage, SequencingGroupStage, stage
 from cpg_utils.config import config_retrieve
 
 from popgen_genotyping.jobs.bafregress_job import run_bafregress
 from popgen_genotyping.jobs.cohort_bcf_to_plink_job import run_cohort_bcf_to_plink
 from popgen_genotyping.jobs.gtc_to_bcfs_job import run_gtc_to_bcfs
+from popgen_genotyping.jobs.merge_plink_job import run_merge_plink
 from popgen_genotyping.metamist_utils import resolve_gtc_path
 from popgen_genotyping.utils import get_output_prefix
 
 if TYPE_CHECKING:
     from cpg_flow.stage import StageInput, StageOutput
-    from cpg_flow.targets import Cohort, SequencingGroup
+    from cpg_flow.targets import Cohort, MultiCohort, SequencingGroup
     from cpg_utils import Path
 
 
@@ -116,3 +117,43 @@ class CohortBcfToPlink(CohortStage):
         )
 
         return self.make_outputs(cohort, data=outputs, jobs=[j])
+
+
+@stage(required_stages=[CohortBcfToPlink])
+class MergeCohortPlink(MultiCohortStage):
+    """
+    Merge all cohort PLINK2 datasets into a single unified dataset.
+    """
+
+    def expected_outputs(self, multicohort: 'MultiCohort') -> dict[str, 'Path']:
+        prefix = get_output_prefix(multicohort.analysis_dataset, self.name)
+        return {
+            'pgen': prefix / 'merged_cohorts.pgen',
+            'pvar': prefix / 'merged_cohorts.pvar',
+            'psam': prefix / 'merged_cohorts.psam',
+        }
+
+    def queue_jobs(self, multicohort: 'MultiCohort', inputs: 'StageInput') -> 'StageOutput':
+        outputs = self.expected_outputs(multicohort)
+
+        # Gather all PLINK2 output paths from CohortBcfToPlink stage
+        # as_dict_by_target for a MultiCohort stage with CohortStage dependencies
+        # returns dict[target_id, outputs]
+        all_cohort_outputs = inputs.as_dict_by_target(CohortBcfToPlink)
+
+        cohort_plink_paths = []
+        for _cohort_id, cohort_outs in all_cohort_outputs.items():
+            # cohort_outs is a dict with 'pgen', 'pvar', 'psam'
+            cohort_plink_paths.append({
+                'pgen': str(cohort_outs['pgen']),
+                'pvar': str(cohort_outs['pvar']),
+                'psam': str(cohort_outs['psam']),
+            })
+
+        j = run_merge_plink(
+            cohort_plink_paths=cohort_plink_paths,
+            output_prefix=str(outputs['pgen']).replace('.pgen', ''),
+            job_name='MergeCohortPlink',
+        )
+
+        return self.make_outputs(multicohort, data=outputs, jobs=[j])
