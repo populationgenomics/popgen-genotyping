@@ -21,19 +21,31 @@ def run_command(command: str) -> None:
     """Run a shell command and log its output."""
     logger.info(f"Running command: {command}")
     cmd_args = shlex.split(command)
-    result = subprocess.run(cmd_args, check=True, text=True, capture_output=True)
+    result = subprocess.run(cmd_args, check=True, text=True, capture_output=True)  # noqa: S603
     if result.stdout:
         logger.info(result.stdout)
     if result.stderr:
         logger.warning(result.stderr)
 
 
-def convert_bcf_to_pgen(sg_id: str, local_bcf: str, output_dir: str) -> str:
+def convert_bcf_to_pgen(sg_id: str, local_bcf: str, output_dir: str, sex_tsv: str | None = None) -> str:
     """Convert a single BCF to PLINK2 format."""
     out_prefix = os.path.join(output_dir, sg_id)
 
-    # Convert to PGEN
-    run_command(f"plink2 --bcf {local_bcf} --make-pgen --out {out_prefix}")
+    # Base command with new flags
+    command = (
+        f"plink2 --bcf {local_bcf} "
+        f"--split-par hg38 "
+        f"--max-alleles 2 "
+        f"--make-pgen "
+        f"--out {out_prefix}"
+    )
+
+    # Add sex update if provided
+    if sex_tsv:
+        command += f" --update-sex {sex_tsv}"
+
+    run_command(command)
 
     return out_prefix
 
@@ -42,6 +54,7 @@ def main():
     parser = argparse.ArgumentParser(description="Convert and merge BCFs to PLINK2")
     parser.add_argument("--manifest", required=True, help="Path to local JSON manifest")
     parser.add_argument("--out-prefix", required=True, help="Local output prefix for merged files")
+    parser.add_argument("--sex-tsv", help="Path to local 3-column sex metadata TSV")
     parser.add_argument("--threads", type=int, default=8, help="Number of parallel threads")
     args = parser.parse_args()
 
@@ -60,7 +73,7 @@ def main():
     pgen_prefixes = []
     with ThreadPoolExecutor(max_workers=args.threads) as executor:
         future_to_sg = {
-            executor.submit(convert_bcf_to_pgen, sg_id, bcf_path, output_dir): sg_id
+            executor.submit(convert_bcf_to_pgen, sg_id, bcf_path, output_dir, args.sex_tsv): sg_id
             for sg_id, bcf_path in samples.items()
         }
         for future in as_completed(future_to_sg):

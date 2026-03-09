@@ -11,7 +11,7 @@ from popgen_genotyping.jobs.bafregress_job import run_bafregress
 from popgen_genotyping.jobs.cohort_bcf_to_plink_job import run_cohort_bcf_to_plink
 from popgen_genotyping.jobs.gtc_to_bcfs_job import run_gtc_to_bcfs
 from popgen_genotyping.jobs.merge_plink_job import run_merge_plink
-from popgen_genotyping.metamist_utils import resolve_gtc_path, query_previous_aggregate
+from popgen_genotyping.metamist_utils import resolve_gtc_path, query_previous_aggregate, query_reported_sex
 from popgen_genotyping.utils import get_output_prefix, parse_psam
 
 if TYPE_CHECKING:
@@ -99,7 +99,7 @@ class CohortBcfToPlink(CohortStage):
     def queue_jobs(self, cohort: 'Cohort', inputs: 'StageInput') -> 'StageOutput':
         outputs = self.expected_outputs(cohort)
 
-        # Pull light BCF paths from GtcToBcfs for all SGs in this cohort
+        # 1. Pull light BCF paths from GtcToBcfs for all SGs in this cohort
         sg_outputs = inputs.as_dict_by_target(GtcToBcfs)
         cohort_sg_ids = set(cohort.get_sequencing_group_ids())
 
@@ -109,10 +109,20 @@ class CohortBcfToPlink(CohortStage):
             if sg_id in cohort_sg_ids
         }
 
+        # 2. Fetch reported sex metadata for these SGs
+        full_sex_mapping = query_reported_sex(cohort.analysis_dataset.name)
+        # Filter to include only those in the current cohort
+        sex_mapping = {
+            sg_id: sex_code
+            for sg_id, sex_code in full_sex_mapping.items()
+            if sg_id in cohort_sg_ids
+        }
+
         # Define the job via the job utility
         j = run_cohort_bcf_to_plink(
             bcf_paths=bcf_paths,
             output_prefix=str(outputs['pgen']).replace('.pgen', ''),
+            sex_mapping=sex_mapping,
             job_name=f'CohortBcfToPlink_{cohort.name}',
         )
 

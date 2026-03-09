@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 def run_cohort_bcf_to_plink(
     bcf_paths: dict[str, str],
     output_prefix: str,
+    sex_mapping: dict[str, str] | None = None,
     job_name: str = 'cohort_bcf_to_plink',
 ) -> 'Job':
     """
@@ -24,6 +25,7 @@ def run_cohort_bcf_to_plink(
     Args:
         bcf_paths (dict[str, str]): Mapping of SG ID to cloud BCF path.
         output_prefix (str): Cloud prefix for the merged PLINK2 files.
+        sex_mapping (dict[str, str], optional): Mapping of SG ID to sex code (1 or 2).
         job_name (str): Name for the Hail Batch job.
 
     Returns:
@@ -44,10 +46,7 @@ def run_cohort_bcf_to_plink(
     # 2. Stage all BCFs and indices
     staged_bcfs = {}
     for sg_id, cloud_path in bcf_paths.items():
-        staged_bcfs[sg_id] = b.read_input_group(
-            bcf=cloud_path,
-            csi=f'{cloud_path}.csi'
-        )
+        staged_bcfs[sg_id] = b.read_input_group(bcf=cloud_path, csi=f'{cloud_path}.csi')
 
     # 3. Define output resource group
     j.declare_resource_group(
@@ -59,26 +58,34 @@ def run_cohort_bcf_to_plink(
     )
 
     # 4. Construct local manifest and execute script
-    # We build the manifest string in python then echo it to a file in the container
-    manifest_data = {
-        'manifest': {sg_id: str(resource.bcf) for sg_id, resource in staged_bcfs.items()}
-    }
+    manifest_data = {'manifest': {sg_id: str(resource.bcf) for sg_id, resource in staged_bcfs.items()}}
     manifest_json = json.dumps(manifest_data)
 
-    j.command(
-        f"""
-        set -ex
+    # Prepare command components
+    command_lines = ['set -ex', f"echo '{manifest_json}' > local_manifest.json"]
 
-        echo '{manifest_json}' > local_manifest.json
+    script_args = [
+        f'python3 {vcf_to_plink_script}',
+        '--manifest local_manifest.json',
+        f'--out-prefix {j.output_plink}',
+        '--threads 8',
+    ]
 
-        python3 {vcf_to_plink_script} \\
-            --manifest local_manifest.json \\
-            --out-prefix {j.output_plink} \\
-            --threads 8
-        """
-    )
+    # 5. Handle sex metadata if provided
+    if sex_mapping:
+        sex_tsv_lines = []
+        for sg_id, sex_code in sex_mapping.items():
+            sex_tsv_lines.append(f'0\t{sg_id}\t{sex_code}')
 
-    # 5. Write outputs back to cloud
+        sex_tsv_content = '\n'.join(sex_tsv_lines)
+        command_lines.append(f'echo -e "{sex_tsv_content}" > sex_metadata.tsv')
+        script_args.append('--sex-tsv sex_metadata.tsv')
+
+    command_lines.append(' '.join(script_args))
+
+    j.command('\n'.join(command_lines))
+
+    # 6. Write outputs back to cloud
     b.write_output(j.output_plink, output_prefix)
 
     return j
