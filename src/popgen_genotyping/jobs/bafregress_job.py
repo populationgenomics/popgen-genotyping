@@ -31,8 +31,8 @@ def run_bafregress(
     j.memory(config_retrieve(['popgen_genotyping', 'bafregress', 'memory'], 'standard'))
     j.storage(config_retrieve(['popgen_genotyping', 'bafregress', 'storage'], '10G'))
 
-    # Read the input BCF file.
-    bcf_file = b.read_input(bcf_path)
+    # Read the input BCF file with index.
+    bcf_file = b.read_input_group(bcf=bcf_path, csi=f'{bcf_path}.csi')
 
     j.command(
         f"""
@@ -40,7 +40,7 @@ def run_bafregress(
 
         # Run BAFRegress and redirect stdout directly to the Hail resource
         bcftools +BAFregress \\
-            "{bcf_file}" > {j.baf_regress_out}
+            "{bcf_file.bcf}" > {j.baf_regress_out}
         """
     )
 

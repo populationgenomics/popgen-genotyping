@@ -62,7 +62,7 @@ def run_gtc_to_bcfs(
         light_bcf={
             'bcf': '{root}.bcf',
             'bcf.csi': '{root}.bcf.csi',
-        }
+        },
     )
 
     # Optimized command:
@@ -83,12 +83,14 @@ def run_gtc_to_bcfs(
             --fasta-ref {ref_fasta.base} \\
             --extra {metadata_filename} \\
             {gtc_file} | \\
-        bcftools sort -Ou -T /dev/shm/bcftools-tmp | \\
-        bcftools norm --no-version -Ou -c x -f {ref_fasta.base} | \\
-        bcftools reheader -n {sample_id} -o {j.heavy_bcf.bcf} --write-index
+        bcftools norm -m -both --no-version -c x -f {ref_fasta.base} | \\
+        bcftools sort -T /dev/shm/bcftools-tmp | \\
+        bcftools reheader -n {sample_id} | \\
+        bcftools view -O b -o {j.heavy_bcf.bcf} --write-index
 
-        bcftools annotate -x ^FORMAT/GT,FORMAT/GQ {j.heavy_bcf.bcf} \\
-            -o {j.light_bcf.bcf} --write-index
+        bcftools annotate --no-version -x ^FORMAT/GT,FORMAT/GQ {j.heavy_bcf.bcf} \\
+        -O b -o {j.light_bcf.bcf} --write-index
+
 
         # Move metadata to a resource or just write it directly if it's small
         mv {metadata_filename} {j.metadata_tsv}

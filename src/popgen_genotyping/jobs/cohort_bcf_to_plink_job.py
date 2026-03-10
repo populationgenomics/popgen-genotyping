@@ -35,9 +35,9 @@ def run_cohort_bcf_to_plink(
     j = b.new_job(name=job_name)
 
     j.image(config_retrieve(['workflow', 'BcfToPlink_image']))
-    j.cpu(8)
-    j.memory('highmem')
-    j.storage('50G')
+    j.cpu(config_retrieve(['popgen_genotyping', 'cohort_bcf_to_plink', 'cpu'], 8))
+    j.memory(config_retrieve(['popgen_genotyping', 'cohort_bcf_to_plink', 'memory'], 'highmem'))
+    j.storage(config_retrieve(['popgen_genotyping', 'cohort_bcf_to_plink', 'storage'], '50G'))
 
     # 1. Stage the orchestration script
     script_path = Path(__file__).parent.parent / 'scripts' / 'vcf_to_plink.py'
@@ -51,9 +51,9 @@ def run_cohort_bcf_to_plink(
     # 3. Define output resource group
     j.declare_resource_group(
         output_plink={
-            'pgen': '{root}.pgen',
-            'pvar': '{root}.pvar',
-            'psam': '{root}.psam',
+            'bed': '{root}.bed',
+            'bim': '{root}.bim',
+            'fam': '{root}.fam',
         }
     )
 
@@ -75,6 +75,7 @@ def run_cohort_bcf_to_plink(
     if sex_mapping:
         sex_tsv_lines = []
         for sg_id, sex_code in sex_mapping.items():
+            # PLINK 1.9 format: FamilyID(0) SampleID Sex
             sex_tsv_lines.append(f'0\t{sg_id}\t{sex_code}')
 
         sex_tsv_content = '\n'.join(sex_tsv_lines)
@@ -85,7 +86,7 @@ def run_cohort_bcf_to_plink(
 
     j.command('\n'.join(command_lines))
 
-    # 6. Write outputs back to cloud
+    # 6. Write outputs back to cloud (using output_prefix which stages.py will set to tmp)
     b.write_output(j.output_plink, output_prefix)
 
     return j

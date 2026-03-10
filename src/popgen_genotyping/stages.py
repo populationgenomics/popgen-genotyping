@@ -9,6 +9,7 @@ from cpg_utils.config import config_retrieve
 
 from popgen_genotyping.jobs.bafregress_job import run_bafregress
 from popgen_genotyping.jobs.cohort_bcf_to_plink_job import run_cohort_bcf_to_plink
+from popgen_genotyping.jobs.export_cohort_datasets_job import run_export_cohort_datasets
 from popgen_genotyping.jobs.gtc_to_bcfs_job import run_gtc_to_bcfs
 from popgen_genotyping.jobs.merge_plink_job import run_merge_plink
 from popgen_genotyping.metamist_utils import resolve_gtc_path, query_previous_aggregate, query_reported_sex
@@ -85,15 +86,17 @@ class BafRegress(SequencingGroupStage):
 @stage(required_stages=[GtcToBcfs])
 class CohortBcfToPlink(CohortStage):
     """
-    Convert all light BCFs in a cohort to PLINK2 format and merge them.
+    Convert all light BCFs in a cohort to PLINK 1.9 format and merge them.
+    Output is stored in tmp.
     """
 
     def expected_outputs(self, cohort: 'Cohort') -> dict[str, 'Path']:
-        prefix = get_output_prefix(cohort.analysis_dataset, self.name)
+        # Store in tmp per EDIT requirement
+        prefix = get_output_prefix(cohort.analysis_dataset, self.name, tmp=True)
         return {
-            'pgen': prefix / 'cohort.pgen',
-            'pvar': prefix / 'cohort.pvar',
-            'psam': prefix / 'cohort.psam',
+            'bed': prefix / 'cohort.bed',
+            'bim': prefix / 'cohort.bim',
+            'fam': prefix / 'cohort.fam',
         }
 
     def queue_jobs(self, cohort: 'Cohort', inputs: 'StageInput') -> 'StageOutput':
@@ -121,7 +124,7 @@ class CohortBcfToPlink(CohortStage):
         # Define the job via the job utility
         j = run_cohort_bcf_to_plink(
             bcf_paths=bcf_paths,
-            output_prefix=str(outputs['pgen']).replace('.pgen', ''),
+            output_prefix=str(outputs['bed']).replace('.bed', ''),
             sex_mapping=sex_mapping,
             job_name=f'CohortBcfToPlink_{cohort.name}',
         )
@@ -132,15 +135,17 @@ class CohortBcfToPlink(CohortStage):
 @stage(required_stages=[CohortBcfToPlink])
 class MergeCohortPlink(MultiCohortStage):
     """
-    Merge all cohort PLINK2 datasets into a single unified dataset, with rolling aggregate.
+    Merge all cohort PLINK 1.9 datasets into a single unified dataset, with rolling aggregate.
+    Output is stored in tmp.
     """
 
     def expected_outputs(self, multicohort: 'MultiCohort') -> dict[str, 'Path']:
-        prefix = get_output_prefix(multicohort.analysis_dataset, self.name)
+        # Store in tmp per EDIT requirement
+        prefix = get_output_prefix(multicohort.analysis_dataset, self.name, tmp=True)
         return {
-            'pgen': prefix / 'merged_cohorts.pgen',
-            'pvar': prefix / 'merged_cohorts.pvar',
-            'psam': prefix / 'merged_cohorts.psam',
+            'bed': prefix / 'merged_cohorts.bed',
+            'bim': prefix / 'merged_cohorts.bim',
+            'fam': prefix / 'merged_cohorts.fam',
         }
 
     def queue_jobs(self, multicohort: 'MultiCohort', inputs: 'StageInput') -> 'StageOutput':
@@ -151,9 +156,9 @@ class MergeCohortPlink(MultiCohortStage):
         cohort_plink_paths = []
         for _cohort_id, cohort_outs in all_cohort_outputs.items():
             cohort_plink_paths.append({
-                'pgen': str(cohort_outs['pgen']),
-                'pvar': str(cohort_outs['pvar']),
-                'psam': str(cohort_outs['psam']),
+                'bed': str(cohort_outs['bed']),
+                'bim': str(cohort_outs['bim']),
+                'fam': str(cohort_outs['fam']),
             })
 
         # 2. Check for rolling aggregate
@@ -169,13 +174,14 @@ class MergeCohortPlink(MultiCohortStage):
             # Query Metamist for the previous analysis
             prev_outputs, active_sg_ids = query_previous_aggregate(int(prev_analysis_id))
             previous_aggregate_paths = {
-                'pgen': prev_outputs['pgen'],
-                'pvar': prev_outputs['pvar'],
-                'psam': prev_outputs['psam'],
+                'bed': prev_outputs['bed'],
+                'bim': prev_outputs['bim'],
+                'fam': prev_outputs['fam'],
             }
 
-            # Parse the previous PSAM to find all samples
-            prev_samples = parse_psam(previous_aggregate_paths['psam'])
+            # Parse the previous PSAM/FAM to find all samples
+            # Note: We might need a parse_fam utility if parse_psam is too specific to PLINK2
+            prev_samples = parse_psam(previous_aggregate_paths['fam'])
 
             # Find samples that are no longer active
             samples_to_remove = list(set(prev_samples) - set(active_sg_ids))
@@ -183,10 +189,45 @@ class MergeCohortPlink(MultiCohortStage):
         # 3. Call merge job
         j = run_merge_plink(
             cohort_plink_paths=cohort_plink_paths,
-            output_prefix=str(outputs['pgen']).replace('.pgen', ''),
+            output_prefix=str(outputs['bed']).replace('.bed', ''),
             previous_aggregate_paths=previous_aggregate_paths,
             samples_to_remove=samples_to_remove,
             job_name='MergeCohortPlink',
+        )
+
+        return self.make_outputs(multicohort, data=outputs, jobs=[j])
+
+
+@stage(required_stages=[MergeCohortPlink])
+class ExportCohortDatasets(MultiCohortStage):
+    """
+    Export the merged cohort to PLINK2 and BCF formats for long-term storage.
+    """
+
+    def expected_outputs(self, multicohort: 'MultiCohort') -> dict[str, 'Path']:
+        prefix = get_output_prefix(multicohort.analysis_dataset, self.name)
+        return {
+            'pgen': prefix / 'cohort.pgen',
+            'pvar': prefix / 'cohort.pvar',
+            'psam': prefix / 'cohort.psam',
+            'bcf': prefix / 'cohort.bcf',
+        }
+
+    def queue_jobs(self, multicohort: 'MultiCohort', inputs: 'StageInput') -> 'StageOutput':
+        outputs = self.expected_outputs(multicohort)
+
+        # 1. Pull input from MergeCohortPlink
+        input_plink = inputs.as_dict(multicohort, MergeCohortPlink)
+
+        # 2. Call export job
+        j = run_export_cohort_datasets(
+            input_plink_prefix={
+                'bed': str(input_plink['bed']),
+                'bim': str(input_plink['bim']),
+                'fam': str(input_plink['fam']),
+            },
+            output_prefix=str(outputs['pgen']).replace('.pgen', ''),
+            job_name='ExportCohortDatasets',
         )
 
         return self.make_outputs(multicohort, data=outputs, jobs=[j])

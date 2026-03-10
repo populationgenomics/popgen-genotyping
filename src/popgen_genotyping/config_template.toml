@@ -20,7 +20,7 @@ driver_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/cpg_flow:l
 BcfToPlink_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/bcftools_plink:latest'
 version = 'v1'
 
-[popgen_genotyping.gtc_to_heavy_vcf]
+[popgen_genotyping.gtc_to_bcfs]
 cpu = 2
 memory = 'standard'
 storage = '50G'
@@ -29,6 +29,16 @@ storage = '50G'
 cpu = 1
 memory = 'standard'
 storage = '10G'
+
+[popgen_genotyping.cohort_bcf_to_plink]
+cpu = 8
+memory = 'highmem'
+storage = '50G'
+
+[popgen_genotyping.merge_cohort_plink]
+cpu = 4
+memory = 'highmem'
+storage = '100G'
 
 [popgen_genotyping.references]
 fasta_ref_path = 'gs://cpg-common-main/references/hg38/v0/Homo_sapiens_assembly38.fasta'

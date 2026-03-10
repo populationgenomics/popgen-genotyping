@@ -21,23 +21,24 @@ def run_command(command: str) -> None:
     """Run a shell command and log its output."""
     logger.info(f"Running command: {command}")
     cmd_args = shlex.split(command)
-    result = subprocess.run(cmd_args, check=True, text=True, capture_output=True)  # noqa: S603
-    if result.stdout:
-        logger.info(result.stdout)
-    if result.stderr:
-        logger.warning(result.stderr)
+    # Don't capture output so it streams to the console for debugging
+    subprocess.run(cmd_args, check=True)  # noqa: S603
 
 
-def convert_bcf_to_pgen(sg_id: str, local_bcf: str, output_dir: str, sex_tsv: str | None = None) -> str:
-    """Convert a single BCF to PLINK2 format."""
+def convert_bcf_to_plink19(sg_id: str, local_bcf: str, output_dir: str, sex_tsv: str | None = None) -> str:
+    """Convert a single BCF to a sorted PLINK 1.9 binary fileset using PLINK2."""
     out_prefix = os.path.join(output_dir, sg_id)
 
-    # Base command with new flags
+    # Use PLINK2 for initial conversion to leverage --max-alleles 2
+    # This filters out multiallelic variants before they hit the PLINK 1.9 merge
     command = (
         f"plink2 --bcf {local_bcf} "
-        f"--split-par hg38 "
         f"--max-alleles 2 "
-        f"--make-pgen "
+        f"--split-par hg38 "
+        f"--set-all-var-ids '@:#:$r:$a' "
+        f"--allow-extra-chr "
+        f"--make-bed "
+        f"--memory 2000 "
         f"--out {out_prefix}"
     )
 
@@ -51,7 +52,7 @@ def convert_bcf_to_pgen(sg_id: str, local_bcf: str, output_dir: str, sex_tsv: st
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Convert and merge BCFs to PLINK2")
+    parser = argparse.ArgumentParser(description="Convert and merge BCFs to PLINK 1.9")
     parser.add_argument("--manifest", required=True, help="Path to local JSON manifest")
     parser.add_argument("--out-prefix", required=True, help="Local output prefix for merged files")
     parser.add_argument("--sex-tsv", help="Path to local 3-column sex metadata TSV")
@@ -68,31 +69,43 @@ def main():
     output_dir = "plink_outputs"
     os.makedirs(output_dir, exist_ok=True)
 
-    # 1. Parallel conversion
-    logger.info(f"Converting {len(samples)} samples to PLINK2 format...")
-    pgen_prefixes = []
+    # 1. Parallel conversion to sorted bed/bim/fam
+    logger.info(f"Converting {len(samples)} samples to PLINK 1.9 format...")
+    prefixes = []
     with ThreadPoolExecutor(max_workers=args.threads) as executor:
         future_to_sg = {
-            executor.submit(convert_bcf_to_pgen, sg_id, bcf_path, output_dir, args.sex_tsv): sg_id
+            executor.submit(convert_bcf_to_plink19, sg_id, bcf_path, output_dir, args.sex_tsv): sg_id
             for sg_id, bcf_path in samples.items()
         }
         for future in as_completed(future_to_sg):
             sg_id = future_to_sg[future]
             try:
-                pgen_prefix = future.result()
-                pgen_prefixes.append(pgen_prefix)
+                prefix = future.result()
+                prefixes.append(prefix)
             except Exception as e:
                 logger.error(f"Sample {sg_id} failed: {e}")
                 raise
 
-    # 2. Final merge
-    mergelist_path = "mergelist.txt"
-    with open(mergelist_path, "w") as f:
-        for prefix in pgen_prefixes:
-            f.write(f"{prefix}\n")
+    # 2. Final merge using --merge-list
+    first_prefix = prefixes[0]
+    rest_prefixes = prefixes[1:]
 
-    logger.info("Merging all samples into a single cohort dataset...")
-    run_command(f"plink2 --pmerge-list {mergelist_path} --make-pgen --out {args.out_prefix}")
+    if not rest_prefixes:
+        logger.info("Single sample detected, copying to final output...")
+        run_command(f"plink1.9 --bfile {first_prefix} --allow-extra-chr --make-bed --out {args.out_prefix}")
+    else:
+        mergelist_path = "mergelist_rest.txt"
+        with open(mergelist_path, "w") as f:
+            for prefix in rest_prefixes:
+                f.write(f"{prefix}\n")
+
+        logger.info(f"Merging {len(rest_prefixes)} samples using --merge-list...")
+        run_command(
+            f"plink1.9 --bfile {first_prefix} "
+            f"--merge-list {mergelist_path} "
+            f"--allow-extra-chr "
+            f"--make-bed --out {args.out_prefix}"
+        )
 
     logger.info("Done!")
 

@@ -38,6 +38,7 @@ QUERY_GENOTYPING_MANIFESTS = gql(
     query GenotypingManifestQuery($project: String!) {
       project(name: $project) {
         analyses(type: {eq: "manifest"}) {
+          id
           type
           outputs
         }
@@ -91,6 +92,8 @@ def query_genotyping_manifests(project: str | None = None) -> list[dict]:
 
         basename = outputs.get('basename', '')
         if 'genotyping_array' in basename:
+            # Include the analysis ID in the outputs for later sorting
+            outputs['id'] = analysis.get('id')
             manifest_outputs.append(outputs)
 
     return manifest_outputs
@@ -137,7 +140,7 @@ def resolve_gtc_path(sequencing_group: 'SequencingGroup') -> str:
 
     # 2. Resolve the cohort for this sequencing group
     cohort = get_sequencing_group_cohort(sequencing_group)
-    cohort_id = cohort.id
+    cohort_id = cohort.id  # Expected format: COH[0-9]+
 
     # 3. Find manifest with the cohort ID in its basename
     matching_manifests = [
@@ -145,17 +148,22 @@ def resolve_gtc_path(sequencing_group: 'SequencingGroup') -> str:
     ]
 
     if not matching_manifests:
+        available_basenames = [m.get('basename', 'unknown') for m in all_manifests]
         raise ValueError(
-            f'No manifest found for cohort {cohort_id} in project {sequencing_group.dataset.name}'
+            f'No manifest found for cohort {cohort_id} in project {sequencing_group.dataset.name}. '
+            f'Available manifest basenames: {available_basenames}'
         )
 
     # Sort by ID to get the latest if multiple exist for the same cohort
-    matching_manifests.sort(key=lambda x: x.get('id', 0), reverse=True)
+    # Ensure ID is treated as integer for sorting
+    matching_manifests.sort(key=lambda x: int(x.get('id', 0)), reverse=True)
     latest_manifest = matching_manifests[0]
     manifest_path = latest_manifest.get('path')
 
     if not manifest_path:
-        raise ValueError(f'Manifest for cohort {cohort_id} has no path output')
+        raise ValueError(
+            f'Manifest for cohort {cohort_id} (ID: {latest_manifest.get("id")}) has no path output'
+        )
 
     # 4. Parse the chosen manifest and retrieve the path
     mapping = parse_genotyping_manifest(manifest_path)
@@ -163,7 +171,7 @@ def resolve_gtc_path(sequencing_group: 'SequencingGroup') -> str:
     if sequencing_group.id not in mapping:
         raise ValueError(
             f'Sequencing group {sequencing_group.id} not found in genotyping manifest '
-            f'{manifest_path}'
+            f'{manifest_path}. Manifest contains {len(mapping)} entries.'
         )
 
     return mapping[sequencing_group.id]

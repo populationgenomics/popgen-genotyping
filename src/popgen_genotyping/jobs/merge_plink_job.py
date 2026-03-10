@@ -4,6 +4,7 @@ Job logic for merging multiple cohort PLINK2 datasets into a single unified data
 
 from typing import TYPE_CHECKING
 
+from cpg_utils import to_path
 from cpg_utils.config import config_retrieve
 from cpg_utils.hail_batch import get_batch
 
@@ -19,11 +20,11 @@ def run_merge_plink(
     job_name: str = 'merge_cohort_plink',
 ) -> 'Job':
     """
-    Merge multiple PLINK2 datasets into a single unified dataset, with rolling aggregate support.
+    Merge multiple PLINK 1.9 datasets into a single unified dataset, with rolling aggregate support.
 
     Args:
-        cohort_plink_paths (list[dict[str, str]]): List of dicts, each with 'pgen', 'pvar', 'psam' cloud paths.
-        output_prefix (str): Cloud prefix for the final merged PLINK2 files.
+        cohort_plink_paths (list[dict[str, str]]): List of dicts, each with 'bed', 'bim', 'fam' cloud paths.
+        output_prefix (str): Cloud prefix for the final merged PLINK 1.9 files.
         previous_aggregate_paths (dict[str, str], optional): Paths for the previous rolling aggregate.
         samples_to_remove (list[str], optional): List of SG IDs to remove from the previous aggregate.
         job_name (str): Name for the Hail Batch job.
@@ -35,36 +36,39 @@ def run_merge_plink(
     j = b.new_job(name=job_name)
 
     j.image(config_retrieve(['workflow', 'BcfToPlink_image']))
-    j.cpu(4)
-    j.memory('highmem')
-    j.storage('100G')
+    j.cpu(config_retrieve(['popgen_genotyping', 'merge_cohort_plink', 'cpu'], 4))
+    j.memory(config_retrieve(['popgen_genotyping', 'merge_cohort_plink', 'memory'], 'highmem'))
+    j.storage(config_retrieve(['popgen_genotyping', 'merge_cohort_plink', 'storage'], '100G'))
 
     staged_prefixes = []
 
     # 1. Stage the previous aggregate and filter if necessary
     if previous_aggregate_paths:
         prev_resource = b.read_input_group(
-            pgen=previous_aggregate_paths['pgen'],
-            pvar=previous_aggregate_paths['pvar'],
-            psam=previous_aggregate_paths['psam']
+            bed=previous_aggregate_paths['bed'],
+            bim=previous_aggregate_paths['bim'],
+            fam=previous_aggregate_paths['fam']
         )
 
         if samples_to_remove:
             # We must filter the previous aggregate before merging
-            # We declare a resource group for the filtered version
             j.declare_resource_group(
                 filtered_prev={
-                    'pgen': '{root}.pgen',
-                    'pvar': '{root}.pvar',
-                    'psam': '{root}.psam',
+                    'bed': '{root}.bed',
+                    'bim': '{root}.bim',
+                    'fam': '{root}.fam',
                 }
             )
 
-            remove_list_content = '\n'.join(samples_to_remove)
+            # Harden the removal list by writing it to a file via to_path
+            remove_list_path = f'{output_prefix}_samples_to_remove.txt'
+            to_path(remove_list_path).write_text('\n'.join([f'0\t{s}' for s in samples_to_remove]))
+            samples_to_remove_resource = b.read_input(remove_list_path)
+
             j.command(
                 f"""
-                echo "{remove_list_content}" > samples_to_remove.txt
-                plink2 --pfile {prev_resource} --remove samples_to_remove.txt --make-pgen --out {j.filtered_prev}
+                set -ex
+                plink --bfile {prev_resource} --allow-extra-chr --remove {samples_to_remove_resource} --make-bed --out {j.filtered_prev}
                 """
             )
             staged_prefixes.append(str(j.filtered_prev))
@@ -74,33 +78,43 @@ def run_merge_plink(
     # 2. Stage all new input datasets
     for _i, paths in enumerate(cohort_plink_paths):
         resource = b.read_input_group(
-            pgen=paths['pgen'],
-            pvar=paths['pvar'],
-            psam=paths['psam']
+            bed=paths['bed'],
+            bim=paths['bim'],
+            fam=paths['fam']
         )
         staged_prefixes.append(str(resource))
 
     # 3. Define output resource group
     j.declare_resource_group(
         output_plink={
-            'pgen': '{root}.pgen',
-            'pvar': '{root}.pvar',
-            'psam': '{root}.psam',
+            'bed': '{root}.bed',
+            'bim': '{root}.bim',
+            'fam': '{root}.fam',
         }
     )
 
     # 4. Construct merge list and execute
-    merge_list_content = '\n'.join(staged_prefixes)
+    # Note: PLINK 1.9 --merge-list expects prefixes of datasets to merge
+    # excluding the one specified by --bfile.
+    if not staged_prefixes:
+         raise ValueError("No datasets to merge")
+    
+    first_prefix = staged_prefixes[0]
+    rest_prefixes = staged_prefixes[1:]
 
-    j.command(
-        f"""
-        set -ex
+    if not rest_prefixes:
+        j.command(f"plink --bfile {first_prefix} --allow-extra-chr --make-bed --out {j.output_plink}")
+    else:
+        merge_list_content = '\n'.join(rest_prefixes)
+        j.command(
+            f"""
+            set -ex
 
-        echo "{merge_list_content}" > mergelist.txt
+            echo "{merge_list_content}" > mergelist.txt
 
-        plink2 --pmerge-list mergelist.txt --make-pgen --out {j.output_plink}
-        """
-    )
+            plink --bfile {first_prefix} --merge-list mergelist.txt --allow-extra-chr --make-bed --out {j.output_plink}
+            """
+        )
 
     # 5. Write outputs back to cloud
     b.write_output(j.output_plink, output_prefix)
