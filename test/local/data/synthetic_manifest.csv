@@ -1,0 +1,4 @@
+file_name,sample_sheet_id,sample_id,md5sum,bbv_barcode,sentrix_barcode_a,sentrix_position_a,sample_plate,sample_well,sample_plate_position,cpg_sample_id_internal,cpg_gcp_filepath,cpg_sequencing_group_id,cpg_cohort_id
+207794440004_R01C01.gtc,835729022,AGDB00001,deterministic_md5_placeholder,835729022,207794440004,R01C01,AGDB_GDA_001,207794440004_R01C01,A01,XPGLCL50001,gs://cpg-test-main/gtc/CPGSYN001.gtc,CPGSYN001,COH1003
+207794440004_R02C01.gtc,835729023,AGDB00002,deterministic_md5_placeholder,835729023,207794440004,R02C01,AGDB_GDA_001,207794440004_R02C01,A01,XPGLCL50002,gs://cpg-test-main/gtc/CPGSYN002.gtc,CPGSYN002,COH1003
+207794440004_R03C01.gtc,835729024,AGDB00003,deterministic_md5_placeholder,835729024,207794440004,R03C01,AGDB_GDA_001,207794440004_R03C01,A01,XPGLCL50003,gs://cpg-test-main/gtc/CPGSYN003.gtc,CPGSYN003,COH1003
