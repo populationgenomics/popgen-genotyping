@@ -9,7 +9,9 @@ from cpg_utils.hail_batch import get_batch
 from popgen_genotyping.utils import register_job
 
 if TYPE_CHECKING:
-...
+    from hailtop.batch.job import Job
+
+
 def run_gtc_to_bcfs(
     gtc_path: str,
     sample_id: str,
@@ -46,9 +48,6 @@ def run_gtc_to_bcfs(
         default_cpu=2,
         default_storage='50G',
     )
-
-    # Read inputs
-
 
     # Read inputs
     gtc_file = b.read_input(gtc_path)

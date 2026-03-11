@@ -1,16 +1,19 @@
 """
-Job logic for merging individual BCFs into a cohort PLINK2 dataset.
+Job logic for merging individual BCFs into a cohort PLINK 1.9 dataset.
 """
 
 import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from cpg_utils.config import config_retrieve
 from cpg_utils.hail_batch import get_batch
 from popgen_genotyping.utils import register_job
 
 if TYPE_CHECKING:
-...
+    from hailtop.batch.job import Job
+
+
 def run_cohort_bcf_to_plink(
     bcf_paths: dict[str, str],
     output_prefix: str,
@@ -18,11 +21,11 @@ def run_cohort_bcf_to_plink(
     job_name: str = 'cohort_bcf_to_plink',
 ) -> 'Job':
     """
-    Run the PLINK2 conversion and merging orchestration script.
+    Run the PLINK 1.9 conversion and merging orchestration script.
 
     Args:
         bcf_paths (dict[str, str]): Mapping of SG ID to cloud BCF path.
-        output_prefix (str): Cloud prefix for the merged PLINK2 files.
+        output_prefix (str): Cloud prefix for the merged PLINK 1.9 files.
         sex_mapping (dict[str, str], optional): Mapping of SG ID to sex code (1 or 2).
         job_name (str): Name for the Hail Batch job.
 
@@ -39,9 +42,6 @@ def run_cohort_bcf_to_plink(
         default_memory='highmem',
         default_storage='50G',
     )
-
-    # 1. Stage the orchestration script
-
 
     # 1. Stage the orchestration script
     script_path = Path(__file__).parent.parent / 'scripts' / 'vcf_to_plink.py'

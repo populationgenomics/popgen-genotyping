@@ -1,15 +1,18 @@
 """
-Job logic for merging multiple cohort PLINK2 datasets into a single unified dataset.
+Job logic for merging multiple cohort PLINK 1.9 datasets into a single unified dataset.
 """
 
 from typing import TYPE_CHECKING
 
 from cpg_utils import to_path
+from cpg_utils.config import config_retrieve
 from cpg_utils.hail_batch import get_batch
 from popgen_genotyping.utils import register_job
 
 if TYPE_CHECKING:
-...
+    from hailtop.batch.job import Job
+
+
 def run_merge_plink(
     cohort_plink_paths: list[dict[str, str]],
     output_prefix: str,
@@ -42,9 +45,6 @@ def run_merge_plink(
 
     staged_prefixes = []
 
-
-    staged_prefixes = []
-
     # 1. Stage the previous aggregate and filter if necessary
     if previous_aggregate_paths:
         prev_resource = b.read_input_group(
@@ -71,7 +71,8 @@ def run_merge_plink(
             j.command(
                 f"""
                 set -ex
-                plink --bfile {prev_resource} --allow-extra-chr --remove {samples_to_remove_resource} --make-bed --out {j.filtered_prev}
+                plink --bfile {prev_resource} --allow-extra-chr --remove {samples_to_remove_resource} \\
+                    --make-bed --out {j.filtered_prev}
                 """
             )
             staged_prefixes.append(str(j.filtered_prev))
@@ -100,13 +101,13 @@ def run_merge_plink(
     # Note: PLINK 1.9 --merge-list expects prefixes of datasets to merge
     # excluding the one specified by --bfile.
     if not staged_prefixes:
-         raise ValueError("No datasets to merge")
-    
+        raise ValueError('No datasets to merge')
+
     first_prefix = staged_prefixes[0]
     rest_prefixes = staged_prefixes[1:]
 
     if not rest_prefixes:
-        j.command(f"plink --bfile {first_prefix} --allow-extra-chr --make-bed --out {j.output_plink}")
+        j.command(f'plink --bfile {first_prefix} --allow-extra-chr --make-bed --out {j.output_plink}')
     else:
         merge_list_content = '\n'.join(rest_prefixes)
         j.command(

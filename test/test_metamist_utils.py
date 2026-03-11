@@ -16,7 +16,7 @@ def generate_manifest(output_path, num_samples=10, prefix='CPGSYN'):
     """
     Generate a synthetic manifest CSV with all required columns.
     """
-    import csv
+    import csv  # noqa: PLC0415
     headers = [
         'file_name', 'sample_sheet_id', 'sample_id', 'md5sum', 'bbv_barcode',
         'sentrix_barcode_a', 'sentrix_position_a', 'sample_plate', 'sample_well',
@@ -30,7 +30,7 @@ def generate_manifest(output_path, num_samples=10, prefix='CPGSYN'):
         for i in range(1, num_samples + 1):
             sg_id = f'{prefix}{i:03d}'
             writer.writerow({
-                'file_name': f'barcode_pos.gtc',
+                'file_name': 'barcode_pos.gtc',
                 'sample_sheet_id': '123',
                 'sample_id': f'AGDB{i:05d}',
                 'md5sum': 'md5',

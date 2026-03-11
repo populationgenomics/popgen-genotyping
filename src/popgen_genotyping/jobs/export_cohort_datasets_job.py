@@ -4,6 +4,7 @@ Job logic for exporting merged cohort PLINK 1.9 data to PLINK2 and BCF formats.
 
 from typing import TYPE_CHECKING
 
+from cpg_utils.config import config_retrieve
 from cpg_utils.hail_batch import get_batch
 from popgen_genotyping.utils import register_job
 
@@ -57,7 +58,7 @@ def run_export_cohort_datasets(
     # 3. Execute combined export command
     # Using plink2 to generate both PGEN and BCF in a single pass.
     # --allow-extra-chr is included to handle non-standard chromosomes.
-    # --split-par is NOT included here because it was already handled during 
+    # --split-par is NOT included here because it was already handled during
     # the initial conversion from BCF to BED.
     j.command(
         f"""

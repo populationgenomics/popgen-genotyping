@@ -1,3 +1,7 @@
+"""
+Job logic for estimating sample contamination using BAFRegress.
+"""
+
 from typing import TYPE_CHECKING
 
 from cpg_utils.config import config_retrieve
@@ -13,15 +17,16 @@ def run_bafregress(
     output_path: str,
     job_name: str = 'bafregress',
 ) -> 'Job':
-    """Run BAFRegress on a BCF file to estimate sample contamination.
+    """
+    Run BAFRegress on a BCF file to estimate sample contamination.
 
     Args:
         bcf_path (str): Cloud path to input BCF file.
         output_path (str): Cloud path to output BAFRegress.txt file.
+        job_name (str): Name for the Hail Batch job. Defaults to 'bafregress'.
 
     Returns:
         Job: A Hail Batch job object.
-
     """
     b = get_batch()
     j = register_job(

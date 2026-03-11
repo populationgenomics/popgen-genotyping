@@ -6,22 +6,27 @@ This is the main entry point for the workflow.
 
 from argparse import ArgumentParser
 
-from popgen_genotyping.stages import GtcToBcfs, BafRegress, CohortBcfToPlink, MergeCohortPlink, ExportCohortDatasets
-
 from cpg_flow.workflow import run_workflow
+from popgen_genotyping.stages import (
+    BafRegress,
+    CohortBcfToPlink,
+    ExportCohortDatasets,
+    GtcToBcfs,
+    MergeCohortPlink,
+)
 
 
-def cli_main():
+def cli_main() -> None:
     """
-    CLI entrypoint - starts up the workflow
+    Command line entry point for the genotyping pipeline.
     """
-    parser = ArgumentParser()
+    parser = ArgumentParser(description='Genotyping microarray pipeline')
     parser.add_argument('--dry_run', action='store_true', help='Dry run')
-    args = parser.parse_args()
+    args: ArgumentParser = parser.parse_args()
 
     # The workflow name is derived from the package name
-    workflow_name = __package__ or 'popgen_genotyping'
-    stages = [GtcToBcfs, BafRegress, CohortBcfToPlink, MergeCohortPlink, ExportCohortDatasets]
+    workflow_name: str = __package__ or 'popgen_genotyping'
+    stages: list = [GtcToBcfs, BafRegress, CohortBcfToPlink, MergeCohortPlink, ExportCohortDatasets]
 
     run_workflow(name=workflow_name, stages=stages, dry_run=args.dry_run)
 

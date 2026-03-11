@@ -4,7 +4,7 @@ Metamist GraphQL query utilities for the genotyping pipeline.
 
 import csv
 import functools
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from metamist.graphql import gql, query
 from cpg_utils import to_path
@@ -64,7 +64,7 @@ QUERY_PREVIOUS_AGGREGATE = gql(
 )
 
 
-def query_genotyping_manifests(project: str | None = None) -> list[dict]:
+def query_genotyping_manifests(project: str | None = None) -> list[dict[str, Any]]:
     """
     Query Metamist for genotyping manifest analyses.
 
@@ -72,25 +72,25 @@ def query_genotyping_manifests(project: str | None = None) -> list[dict]:
         project (str, optional): Metamist project name. Defaults to the 'dataset' from config.
 
     Returns:
-        list[dict]: List of 'outputs' dictionaries from manifest analyses containing 'genotyping_array'.
+        list[dict[str, Any]]: List of 'outputs' dictionaries from manifest analyses.
     """
     if project is None:
         project = config_retrieve(['workflow', 'dataset'])
 
     # Execute the query
-    query_result = query(QUERY_GENOTYPING_MANIFESTS, {'project': project})
+    query_result: dict[str, Any] = query(QUERY_GENOTYPING_MANIFESTS, {'project': project})
 
     if not query_result.get('project') or not query_result['project'].get('analyses'):
         return []
 
     # Filter for genotyping array manifests
-    manifest_outputs = []
+    manifest_outputs: list[dict[str, Any]] = []
     for analysis in query_result['project']['analyses']:
         outputs = analysis.get('outputs')
         if not outputs or not isinstance(outputs, dict):
             continue
 
-        basename = outputs.get('basename', '')
+        basename: str = outputs.get('basename', '')
         if 'genotyping_array' in basename:
             # Include the analysis ID in the outputs for later sorting
             outputs['id'] = analysis.get('id')
@@ -110,12 +110,12 @@ def parse_genotyping_manifest(manifest_path: str) -> dict[str, str]:
     Returns:
         dict[str, str]: Mapping of Sequencing Group ID to GTC filepath.
     """
-    sg_to_gtc = {}
+    sg_to_gtc: dict[str, str] = {}
     with to_path(manifest_path).open() as f:
         reader = csv.DictReader(f)
         for row in reader:
-            sg_id = row.get('cpg_sequencing_group_id')
-            gtc_path = row.get('cpg_gcp_filepath')
+            sg_id: str | None = row.get('cpg_sequencing_group_id')
+            gtc_path: str | None = row.get('cpg_gcp_filepath')
             if sg_id and gtc_path:
                 sg_to_gtc[sg_id] = gtc_path
 
@@ -136,29 +136,28 @@ def resolve_gtc_path(sequencing_group: 'SequencingGroup') -> str:
         ValueError: If no manifest is found or the SG is not in the manifest.
     """
     # 1. Query all possible genotyping manifests for the project
-    all_manifests = query_genotyping_manifests(sequencing_group.dataset.name)
+    all_manifests: list[dict[str, Any]] = query_genotyping_manifests(sequencing_group.dataset.name)
 
     # 2. Resolve the cohort for this sequencing group
     cohort = get_sequencing_group_cohort(sequencing_group)
-    cohort_id = cohort.id  # Expected format: COH[0-9]+
+    cohort_id: str = cohort.id  # Expected format: COH[0-9]+
 
     # 3. Find manifest with the cohort ID in its basename
-    matching_manifests = [
-        m for m in all_manifests if cohort_id in m.get('basename', '')
+    matching_manifests: list[dict[str, Any]] = [
+        m for m in all_manifests if cohort_id in str(m.get('basename', ''))
     ]
 
     if not matching_manifests:
-        available_basenames = [m.get('basename', 'unknown') for m in all_manifests]
+        available_basenames: list[str] = [str(m.get('basename', 'unknown')) for m in all_manifests]
         raise ValueError(
             f'No manifest found for cohort {cohort_id} in project {sequencing_group.dataset.name}. '
             f'Available manifest basenames: {available_basenames}'
         )
 
     # Sort by ID to get the latest if multiple exist for the same cohort
-    # Ensure ID is treated as integer for sorting
     matching_manifests.sort(key=lambda x: int(x.get('id', 0)), reverse=True)
-    latest_manifest = matching_manifests[0]
-    manifest_path = latest_manifest.get('path')
+    latest_manifest: dict[str, Any] = matching_manifests[0]
+    manifest_path: str | None = latest_manifest.get('path')
 
     if not manifest_path:
         raise ValueError(
@@ -166,7 +165,7 @@ def resolve_gtc_path(sequencing_group: 'SequencingGroup') -> str:
         )
 
     # 4. Parse the chosen manifest and retrieve the path
-    mapping = parse_genotyping_manifest(manifest_path)
+    mapping: dict[str, str] = parse_genotyping_manifest(manifest_path)
 
     if sequencing_group.id not in mapping:
         raise ValueError(
@@ -177,7 +176,7 @@ def resolve_gtc_path(sequencing_group: 'SequencingGroup') -> str:
     return mapping[sequencing_group.id]
 
 
-def query_previous_aggregate(analysis_id: int) -> tuple[dict, list[str]]:
+def query_previous_aggregate(analysis_id: int) -> tuple[dict[str, Any], list[str]]:
     """
     Query Metamist for a previous aggregate analysis and its project's active samples.
 
@@ -185,17 +184,20 @@ def query_previous_aggregate(analysis_id: int) -> tuple[dict, list[str]]:
         analysis_id (int): The Metamist analysis ID.
 
     Returns:
-        tuple[dict, list[str]]: (outputs_dict, active_sg_ids)
+        tuple[dict[str, Any], list[str]]: (outputs_dict, active_sg_ids)
+
+    Raises:
+        ValueError: If the analysis ID is not found.
     """
-    query_result = query(QUERY_PREVIOUS_AGGREGATE, {'id': analysis_id})
+    query_result: dict[str, Any] = query(QUERY_PREVIOUS_AGGREGATE, {'id': analysis_id})
 
     if not query_result.get('analyses'):
         raise ValueError(f'Analysis with ID {analysis_id} not found in Metamist')
 
-    analysis = query_result['analyses'][0]
-    outputs = analysis.get('outputs', {})
-    project = analysis.get('project', {})
-    active_sgs = [sg['id'] for sg in project.get('sequencingGroups', [])]
+    analysis: dict[str, Any] = query_result['analyses'][0]
+    outputs: dict[str, Any] = analysis.get('outputs', {})
+    project: dict[str, Any] = analysis.get('project', {})
+    active_sgs: list[str] = [sg['id'] for sg in project.get('sequencingGroups', [])]
 
     return outputs, active_sgs
 
@@ -208,30 +210,30 @@ def query_reported_sex(project: str | None = None) -> dict[str, str]:
         project (str, optional): Metamist project name. Defaults to the 'dataset' from config.
 
     Returns:
-        dict[str, str]: Mapping of Sequencing Group ID to reported sex (e.g. {'CPG123': 'Female'}).
+        dict[str, str]: Mapping of Sequencing Group ID to reported sex.
     """
     if project is None:
         project = config_retrieve(['workflow', 'dataset'])
 
     # Execute the query
-    query_result = query(QUERY_REPORTED_SEX, {'project': project})
+    query_result: dict[str, Any] = query(QUERY_REPORTED_SEX, {'project': project})
 
     if not query_result.get('project') or not query_result['project'].get('sequencingGroups'):
         return {}
 
     # Extract mapping
-    dict_samples = {}
+    dict_samples: dict[str, str] = {}
     for sg in query_result['project']['sequencingGroups']:
-        sg_id = sg.get('id')
-        sample = sg.get('sample')
+        sg_id: str | None = sg.get('id')
+        sample: dict[str, Any] | None = sg.get('sample')
         if not sg_id or not sample:
             continue
 
-        participant = sample.get('participant')
+        participant: dict[str, Any] | None = sample.get('participant')
         if not participant:
             continue
 
-        reported_sex = participant.get('reportedSex')
+        reported_sex: str | None = participant.get('reportedSex')
         if reported_sex:
             dict_samples[sg_id] = reported_sex
 
@@ -249,21 +251,21 @@ def resolve_rolling_aggregate(prev_analysis_id: int | str) -> tuple[dict[str, st
         tuple[dict[str, str], list[str]]: (previous_aggregate_paths, samples_to_remove)
     """
     # Import here to avoid circular dependency
-    from popgen_genotyping.utils import parse_psam
+    from popgen_genotyping.utils import parse_psam  # noqa: PLC0415
 
     prev_outputs, active_sg_ids = query_previous_aggregate(int(prev_analysis_id))
 
     # Expecting PLINK 1.9 BED/BIM/FAM in outputs
-    previous_aggregate_paths = {
+    previous_aggregate_paths: dict[str, str] = {
         'bed': prev_outputs['bed'],
         'bim': prev_outputs['bim'],
         'fam': prev_outputs['fam'],
     }
 
     # Parse the previous .fam to find all samples that were in the aggregate
-    prev_samples = parse_psam(previous_aggregate_paths['fam'])
+    prev_samples: list[str] = parse_psam(previous_aggregate_paths['fam'])
 
     # Find samples that are in the previous aggregate but no longer active
-    samples_to_remove = list(set(prev_samples) - set(active_sg_ids))
+    samples_to_remove: list[str] = list(set(prev_samples) - set(active_sg_ids))
 
     return previous_aggregate_paths, samples_to_remove
