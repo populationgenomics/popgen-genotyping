@@ -2,21 +2,19 @@
 Job logic for estimating sample contamination using BAFRegress.
 """
 
-from typing import TYPE_CHECKING
 
+from hailtop.batch.job import BashJob
 from cpg_utils.config import config_retrieve
 from cpg_utils.hail_batch import get_batch
 from popgen_genotyping.utils import register_job
 
-if TYPE_CHECKING:
-    from hailtop.batch.job import Job
 
 
 def run_bafregress(
     bcf_path: str,
     output_path: str,
     job_name: str = 'bafregress',
-) -> 'Job':
+) -> 'BashJob':
     """
     Run BAFRegress on a BCF file to estimate sample contamination.
 
@@ -26,7 +24,7 @@ def run_bafregress(
         job_name (str): Name for the Hail Batch job. Defaults to 'bafregress'.
 
     Returns:
-        Job: A Hail Batch job object.
+        BashJob: A Hail Batch BashJob object.
     """
     b = get_batch()
     j = register_job(
@@ -37,9 +35,13 @@ def run_bafregress(
         default_cpu=1,
         default_storage='10G',
     )
+    assert isinstance(j, BashJob)
 
     # Read the input BCF file with index.
     bcf_file = b.read_input_group(bcf=bcf_path, csi=f'{bcf_path}.csi')
+
+    # Explicitly define the output resource to avoid dynamic attribute confusion
+    j.declare_resource_group(output={'txt': '{root}.txt'})
 
     j.command(
         f"""
@@ -47,11 +49,11 @@ def run_bafregress(
 
         # Run BAFRegress and redirect stdout directly to the Hail resource
         bcftools +BAFregress \\
-            "{bcf_file.bcf}" > {j.baf_regress_out}
+            "{bcf_file.bcf}" > {j.output.txt}
         """
     )
 
     # Write the resulting text file to the cloud bucket
-    b.write_output(j.baf_regress_out, output_path)
+    b.write_output(j.output.txt, output_path)
 
     return j

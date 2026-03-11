@@ -11,7 +11,7 @@ from cpg_utils.hail_batch import get_batch
 from popgen_genotyping.utils import register_job
 
 if TYPE_CHECKING:
-    from hailtop.batch.job import Job
+    from hailtop.batch.job import BashJob
 
 
 def run_cohort_bcf_to_plink(
@@ -19,7 +19,7 @@ def run_cohort_bcf_to_plink(
     output_prefix: str,
     sex_mapping: dict[str, str] | None = None,
     job_name: str = 'cohort_bcf_to_plink',
-) -> 'Job':
+) -> 'BashJob':
     """
     Run the PLINK 1.9 conversion and merging orchestration script.
 

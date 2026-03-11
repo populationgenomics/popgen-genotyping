@@ -6,13 +6,13 @@ import csv
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from hailtop.batch.job import BashJob
 from cpg_utils import to_path, Path as CPGPath
 from cpg_utils.config import config_retrieve
 from cpg_flow.workflow import get_workflow
 from cpg_flow.inputs import get_multicohort
 
 if TYPE_CHECKING:
-    from hailtop.batch.job import Job
     from hailtop.batch import Batch
     from cpg_flow.targets import Dataset, SequencingGroup, Cohort
 
@@ -102,7 +102,7 @@ def register_job(
     default_cpu: int = 1,
     default_memory: str = 'standard',
     default_storage: str = '10G',
-) -> 'Job':
+) -> 'BashJob':
     """
     Initialize a Hail Batch job with standard configuration from the project config.
 
@@ -116,9 +116,10 @@ def register_job(
         default_storage (str): Default storage if not found in config. Defaults to '10G'.
 
     Returns:
-        Job: The initialized Hail Batch job object.
+        BashJob: The initialized Hail Batch BashJob object.
     """
-    j: Job = batch.new_job(name=job_name)
+    j = batch.new_job(name=job_name)
+    assert isinstance(j, BashJob)
 
     if image:
         j.image(image)
@@ -130,3 +131,4 @@ def register_job(
     j.storage(config_retrieve([*config_path, 'storage'], default_storage))
 
     return j
+

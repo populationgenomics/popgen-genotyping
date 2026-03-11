@@ -9,14 +9,14 @@ from cpg_utils.hail_batch import get_batch
 from popgen_genotyping.utils import register_job
 
 if TYPE_CHECKING:
-    from hailtop.batch.job import Job
+    from hailtop.batch.job import BashJob
 
 
 def run_export_cohort_datasets(
     input_plink_prefix: dict[str, str],
     output_prefix: str,
     job_name: str = 'export_cohort_datasets',
-) -> 'Job':
+) -> 'BashJob':
     """
     Convert PLINK 1.9 BED/BIM/FAM to PLINK2 (PGEN/PVAR/PSAM) and BCF.
 

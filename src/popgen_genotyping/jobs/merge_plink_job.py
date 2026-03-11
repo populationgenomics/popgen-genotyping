@@ -10,7 +10,7 @@ from cpg_utils.hail_batch import get_batch
 from popgen_genotyping.utils import register_job
 
 if TYPE_CHECKING:
-    from hailtop.batch.job import Job
+    from hailtop.batch.job import BashJob
 
 
 def run_merge_plink(
@@ -19,7 +19,7 @@ def run_merge_plink(
     previous_aggregate_paths: dict[str, str] | None = None,
     samples_to_remove: list[str] | None = None,
     job_name: str = 'merge_cohort_plink',
-) -> 'Job':
+) -> 'BashJob':
     """
     Merge multiple PLINK 1.9 datasets into a single unified dataset, with rolling aggregate support.
 

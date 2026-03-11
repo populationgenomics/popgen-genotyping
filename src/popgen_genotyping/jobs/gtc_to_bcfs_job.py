@@ -9,7 +9,7 @@ from cpg_utils.hail_batch import get_batch
 from popgen_genotyping.utils import register_job
 
 if TYPE_CHECKING:
-    from hailtop.batch.job import Job
+    from hailtop.batch.job import BashJob
 
 
 def run_gtc_to_bcfs(
@@ -22,7 +22,7 @@ def run_gtc_to_bcfs(
     egt_cluster_path: str,
     fasta_ref_path: str,
     job_name: str = 'gtc_to_bcfs',
-) -> 'Job':
+) -> 'BashJob':
     """Convert a single GTC sample to both Heavy (with intensities) and Light BCFs.
 
     Args:
