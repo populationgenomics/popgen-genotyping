@@ -6,12 +6,13 @@ from typing import TYPE_CHECKING
 
 from cpg_flow.stage import CohortStage, MultiCohortStage, SequencingGroupStage, stage
 from cpg_utils.config import config_retrieve
+
 from popgen_genotyping.jobs.bafregress_job import run_bafregress
 from popgen_genotyping.jobs.cohort_bcf_to_plink_job import run_cohort_bcf_to_plink
 from popgen_genotyping.jobs.export_cohort_datasets_job import run_export_cohort_datasets
 from popgen_genotyping.jobs.gtc_to_bcfs_job import run_gtc_to_bcfs
 from popgen_genotyping.jobs.merge_plink_job import run_merge_plink
-from popgen_genotyping.metamist_utils import resolve_gtc_path, query_reported_sex, resolve_rolling_aggregate
+from popgen_genotyping.metamist_utils import query_reported_sex, resolve_gtc_path, resolve_rolling_aggregate
 from popgen_genotyping.utils import get_output_prefix
 
 if TYPE_CHECKING:
@@ -87,11 +88,11 @@ class BafRegress(SequencingGroupStage):
         """
         outputs = self.expected_outputs(sequencing_group)
 
-        # Pull the light BCF output from the previous stage
-        light_bcf_path = inputs.as_path(sequencing_group, GtcToBcfs, 'light_bcf')
+        # Pull the heavy BCF output from the previous stage
+        heavy_bcf_path = inputs.as_path(sequencing_group, GtcToBcfs, 'heavy_bcf')
 
         j = run_bafregress(
-            bcf_path=str(light_bcf_path),
+            bcf_path=str(heavy_bcf_path),
             output_path=str(outputs['bafregress_txt']),
             job_name=f'BafRegress_{sequencing_group.id}',
         )
@@ -128,20 +129,12 @@ class CohortBcfToPlink(CohortStage):
         sg_outputs = inputs.as_dict_by_target(GtcToBcfs)
         cohort_sg_ids = set(cohort.get_sequencing_group_ids())
 
-        bcf_paths = {
-            sg_id: str(outs['light_bcf'])
-            for sg_id, outs in sg_outputs.items()
-            if sg_id in cohort_sg_ids
-        }
+        bcf_paths = {sg_id: str(outs['light_bcf']) for sg_id, outs in sg_outputs.items() if sg_id in cohort_sg_ids}
 
         # 2. Fetch reported sex metadata for these SGs
         full_sex_mapping = query_reported_sex(cohort.analysis_dataset.name)
         # Filter to include only those in the current cohort
-        sex_mapping = {
-            sg_id: sex_code
-            for sg_id, sex_code in full_sex_mapping.items()
-            if sg_id in cohort_sg_ids
-        }
+        sex_mapping = {sg_id: sex_code for sg_id, sex_code in full_sex_mapping.items() if sg_id in cohort_sg_ids}
 
         # Define the job via the job utility
         j = run_cohort_bcf_to_plink(
@@ -183,16 +176,17 @@ class MergeCohortPlink(MultiCohortStage):
         all_cohort_outputs = inputs.as_dict_by_target(CohortBcfToPlink)
         cohort_plink_paths = []
         for _cohort_id, cohort_outs in all_cohort_outputs.items():
-            cohort_plink_paths.append({
-                'bed': str(cohort_outs['bed']),
-                'bim': str(cohort_outs['bim']),
-                'fam': str(cohort_outs['fam']),
-            })
+            cohort_plink_paths.append(
+                {
+                    'bed': str(cohort_outs['bed']),
+                    'bim': str(cohort_outs['bim']),
+                    'fam': str(cohort_outs['fam']),
+                }
+            )
 
         # 2. Check for rolling aggregate
         prev_analysis_id = config_retrieve(
-            ['popgen_genotyping', 'rolling_aggregate', 'previous_analysis_id'],
-            default=None
+            ['popgen_genotyping', 'rolling_aggregate', 'previous_analysis_id'], default=None
         )
 
         previous_aggregate_paths = None

@@ -4,8 +4,9 @@
 Reproduction script for the full genotyping pipeline:
 1. Generate synthetic GTC files.
 2. Convert GTC to BCF using bcftools:1.23-1 (matching gtc_to_bcfs_job.py).
-3. Convert BCF to PLINK 1.9 and merge using official PLINK image.
-4. Export to PLINK2 and BCF formats.
+3. BAFRegress contamination estimation.
+4. Convert BCF to PLINK 1.9 and merge using official PLINK image.
+5. Export to PLINK2 and BCF formats.
 """
 
 import json
@@ -120,6 +121,20 @@ def main() -> None:
         -O b -o {light_bcf} --write-index
         """
         run_docker(BCFTOOLS_IMAGE, cmd, entrypoint='bash')
+
+    # 3.5 BAFRegress (matching BafRegress stage)
+    for sg_id in samples:
+        print(f'\n>>> BAFRegress for {sg_id} <<<')
+        heavy_bcf: str = f'/data/test/local/output/reproduce/bcfs/{sg_id}.heavy.bcf'
+        tagged_bcf: str = f'/data/test/local/output/reproduce/bcfs/{sg_id}.tagged.bcf'
+        baf_out: str = f'/data/test/local/output/reproduce/bcfs/{sg_id}.BAFRegress.txt'
+
+        # Calculate AC/AN tags which BAFRegress needs for allele frequency
+        fill_cmd: str = f'bcftools +fill-tags "{heavy_bcf}" -O b -o "{tagged_bcf}" -- -t AC,AN'
+        run_docker(BCFTOOLS_IMAGE, fill_cmd, entrypoint='bash')
+
+        baf_cmd: str = f'bcftools +BAFregress "{tagged_bcf}" > "{baf_out}"'
+        run_docker(BCFTOOLS_IMAGE, baf_cmd, entrypoint='bash')
 
     # 4. Cohort Merge (PLINK 1.9)
     print('\n>>> Merging into Cohort (PLINK 1.9) <<<')
