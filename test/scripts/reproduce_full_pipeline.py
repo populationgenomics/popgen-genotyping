@@ -22,8 +22,8 @@ OUTPUT_DIR = LOCAL_DIR / 'output' / 'reproduce'
 GTC_DIR = DATA_DIR / 'gtc'
 
 # Docker Images
-BCFTOOLS_IMAGE = 'australia-southeast1-docker.pkg.dev/cpg-common/images-dev/bcftools:1.23-1'
-PLINK_IMAGE = 'plink-multi:local'
+BCFTOOLS_IMAGE = 'australia-southeast1-docker.pkg.dev/cpg-common/images/bcftools:1.23-1'
+PLINK_IMAGE = 'australia-southeast1-docker.pkg.dev/cpg-common/images/plink:1.9-20250819-PLINK-2.0-20260228-1'
 
 # Reference Files
 BPM_MANIFEST = '/data/test/local/reference/GDA-8v1-0_D2.bpm'

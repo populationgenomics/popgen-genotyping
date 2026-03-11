@@ -12,8 +12,8 @@ from popgen_genotyping.jobs.cohort_bcf_to_plink_job import run_cohort_bcf_to_pli
 from popgen_genotyping.jobs.export_cohort_datasets_job import run_export_cohort_datasets
 from popgen_genotyping.jobs.gtc_to_bcfs_job import run_gtc_to_bcfs
 from popgen_genotyping.jobs.merge_plink_job import run_merge_plink
-from popgen_genotyping.metamist_utils import resolve_gtc_path, query_previous_aggregate, query_reported_sex
-from popgen_genotyping.utils import get_output_prefix, parse_psam
+from popgen_genotyping.metamist_utils import resolve_gtc_path, query_reported_sex, resolve_rolling_aggregate
+from popgen_genotyping.utils import get_output_prefix
 
 if TYPE_CHECKING:
     from cpg_flow.stage import StageInput, StageOutput
@@ -171,20 +171,7 @@ class MergeCohortPlink(MultiCohortStage):
         samples_to_remove = None
 
         if prev_analysis_id:
-            # Query Metamist for the previous analysis
-            prev_outputs, active_sg_ids = query_previous_aggregate(int(prev_analysis_id))
-            previous_aggregate_paths = {
-                'bed': prev_outputs['bed'],
-                'bim': prev_outputs['bim'],
-                'fam': prev_outputs['fam'],
-            }
-
-            # Parse the previous PSAM/FAM to find all samples
-            # Note: We might need a parse_fam utility if parse_psam is too specific to PLINK2
-            prev_samples = parse_psam(previous_aggregate_paths['fam'])
-
-            # Find samples that are no longer active
-            samples_to_remove = list(set(prev_samples) - set(active_sg_ids))
+            previous_aggregate_paths, samples_to_remove = resolve_rolling_aggregate(prev_analysis_id)
 
         # 3. Call merge job
         j = run_merge_plink(

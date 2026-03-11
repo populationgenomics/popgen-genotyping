@@ -5,13 +5,11 @@ Job logic for merging multiple cohort PLINK2 datasets into a single unified data
 from typing import TYPE_CHECKING
 
 from cpg_utils import to_path
-from cpg_utils.config import config_retrieve
 from cpg_utils.hail_batch import get_batch
+from popgen_genotyping.utils import register_job
 
 if TYPE_CHECKING:
-    from hailtop.batch.job import Job
-
-
+...
 def run_merge_plink(
     cohort_plink_paths: list[dict[str, str]],
     output_prefix: str,
@@ -33,12 +31,17 @@ def run_merge_plink(
         Job: A Hail Batch job object.
     """
     b = get_batch()
-    j = b.new_job(name=job_name)
+    j = register_job(
+        batch=b,
+        job_name=job_name,
+        config_path=['popgen_genotyping', 'merge_cohort_plink'],
+        image=config_retrieve(['workflow', 'plink_image']),
+        default_cpu=4,
+        default_storage='100G',
+    )
 
-    j.image(config_retrieve(['workflow', 'BcfToPlink_image']))
-    j.cpu(config_retrieve(['popgen_genotyping', 'merge_cohort_plink', 'cpu'], 4))
-    j.memory(config_retrieve(['popgen_genotyping', 'merge_cohort_plink', 'memory'], 'highmem'))
-    j.storage(config_retrieve(['popgen_genotyping', 'merge_cohort_plink', 'storage'], '100G'))
+    staged_prefixes = []
+
 
     staged_prefixes = []
 

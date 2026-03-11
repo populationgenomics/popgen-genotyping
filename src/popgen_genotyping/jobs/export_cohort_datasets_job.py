@@ -4,8 +4,8 @@ Job logic for exporting merged cohort PLINK 1.9 data to PLINK2 and BCF formats.
 
 from typing import TYPE_CHECKING
 
-from cpg_utils.config import config_retrieve
 from cpg_utils.hail_batch import get_batch
+from popgen_genotyping.utils import register_job
 
 if TYPE_CHECKING:
     from hailtop.batch.job import Job
@@ -28,12 +28,14 @@ def run_export_cohort_datasets(
         Job: A Hail Batch job object.
     """
     b = get_batch()
-    j = b.new_job(name=job_name)
-
-    j.image(config_retrieve(['workflow', 'BcfToPlink_image']))
-    j.cpu(config_retrieve(['popgen_genotyping', 'export_cohort_datasets', 'cpu'], 4))
-    j.memory(config_retrieve(['popgen_genotyping', 'export_cohort_datasets', 'memory'], 'standard'))
-    j.storage(config_retrieve(['popgen_genotyping', 'export_cohort_datasets', 'storage'], '100G'))
+    j = register_job(
+        batch=b,
+        job_name=job_name,
+        config_path=['popgen_genotyping', 'export_cohort_datasets'],
+        image=config_retrieve(['workflow', 'plink_image']),
+        default_cpu=4,
+        default_storage='100G',
+    )
 
     # 1. Stage inputs
     plink_input = b.read_input_group(

@@ -6,13 +6,11 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from cpg_utils.config import config_retrieve
 from cpg_utils.hail_batch import get_batch
+from popgen_genotyping.utils import register_job
 
 if TYPE_CHECKING:
-    from hailtop.batch.job import Job
-
-
+...
 def run_cohort_bcf_to_plink(
     bcf_paths: dict[str, str],
     output_prefix: str,
@@ -32,12 +30,18 @@ def run_cohort_bcf_to_plink(
         Job: A Hail Batch job object.
     """
     b = get_batch()
-    j = b.new_job(name=job_name)
+    j = register_job(
+        batch=b,
+        job_name=job_name,
+        config_path=['popgen_genotyping', 'cohort_bcf_to_plink'],
+        image=config_retrieve(['workflow', 'plink_image']),
+        default_cpu=8,
+        default_memory='highmem',
+        default_storage='50G',
+    )
 
-    j.image(config_retrieve(['workflow', 'BcfToPlink_image']))
-    j.cpu(config_retrieve(['popgen_genotyping', 'cohort_bcf_to_plink', 'cpu'], 8))
-    j.memory(config_retrieve(['popgen_genotyping', 'cohort_bcf_to_plink', 'memory'], 'highmem'))
-    j.storage(config_retrieve(['popgen_genotyping', 'cohort_bcf_to_plink', 'storage'], '50G'))
+    # 1. Stage the orchestration script
+
 
     # 1. Stage the orchestration script
     script_path = Path(__file__).parent.parent / 'scripts' / 'vcf_to_plink.py'

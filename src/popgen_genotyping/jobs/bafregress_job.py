@@ -2,6 +2,7 @@ from typing import TYPE_CHECKING
 
 from cpg_utils.config import config_retrieve
 from cpg_utils.hail_batch import get_batch
+from popgen_genotyping.utils import register_job
 
 if TYPE_CHECKING:
     from hailtop.batch.job import Job
@@ -23,13 +24,14 @@ def run_bafregress(
 
     """
     b = get_batch()
-    j = b.new_job(name=job_name)
-
-    j.image(config_retrieve(['workflow', 'driver_image']))
-
-    j.cpu(config_retrieve(['popgen_genotyping', 'bafregress', 'cpu'], 1))
-    j.memory(config_retrieve(['popgen_genotyping', 'bafregress', 'memory'], 'standard'))
-    j.storage(config_retrieve(['popgen_genotyping', 'bafregress', 'storage'], '10G'))
+    j = register_job(
+        batch=b,
+        job_name=job_name,
+        config_path=['popgen_genotyping', 'bafregress'],
+        image=config_retrieve(['workflow', 'bcftools_image']),
+        default_cpu=1,
+        default_storage='10G',
+    )
 
     # Read the input BCF file with index.
     bcf_file = b.read_input_group(bcf=bcf_path, csi=f'{bcf_path}.csi')

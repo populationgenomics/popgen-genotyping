@@ -6,11 +6,10 @@ from typing import TYPE_CHECKING
 
 from cpg_utils.config import config_retrieve
 from cpg_utils.hail_batch import get_batch
+from popgen_genotyping.utils import register_job
 
 if TYPE_CHECKING:
-    from hailtop.batch.job import Job
-
-
+...
 def run_gtc_to_bcfs(
     gtc_path: str,
     sample_id: str,
@@ -39,14 +38,17 @@ def run_gtc_to_bcfs(
         Job: A Hail Batch job object.
     """
     b = get_batch()
-    j = b.new_job(name=job_name)
+    j = register_job(
+        batch=b,
+        job_name=job_name,
+        config_path=['popgen_genotyping', 'gtc_to_bcfs'],
+        image=config_retrieve(['workflow', 'bcftools_image']),
+        default_cpu=2,
+        default_storage='50G',
+    )
 
-    j.image(config_retrieve(['workflow', 'driver_image']))
+    # Read inputs
 
-    # Use heavy resources as this performs the initial conversion and sorting
-    j.cpu(config_retrieve(['popgen_genotyping', 'gtc_to_bcfs', 'cpu'], 2))
-    j.memory(config_retrieve(['popgen_genotyping', 'gtc_to_bcfs', 'memory'], 'standard'))
-    j.storage(config_retrieve(['popgen_genotyping', 'gtc_to_bcfs', 'storage'], '50G'))
 
     # Read inputs
     gtc_file = b.read_input(gtc_path)

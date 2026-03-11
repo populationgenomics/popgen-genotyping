@@ -236,3 +236,34 @@ def query_reported_sex(project: str | None = None) -> dict[str, str]:
             dict_samples[sg_id] = reported_sex
 
     return dict_samples
+
+
+def resolve_rolling_aggregate(prev_analysis_id: int | str) -> tuple[dict[str, str], list[str]]:
+    """
+    Resolve paths and sample delta for a rolling multi-cohort aggregate.
+
+    Args:
+        prev_analysis_id (int | str): The Metamist analysis ID of the previous aggregate.
+
+    Returns:
+        tuple[dict[str, str], list[str]]: (previous_aggregate_paths, samples_to_remove)
+    """
+    # Import here to avoid circular dependency
+    from popgen_genotyping.utils import parse_psam
+
+    prev_outputs, active_sg_ids = query_previous_aggregate(int(prev_analysis_id))
+
+    # Expecting PLINK 1.9 BED/BIM/FAM in outputs
+    previous_aggregate_paths = {
+        'bed': prev_outputs['bed'],
+        'bim': prev_outputs['bim'],
+        'fam': prev_outputs['fam'],
+    }
+
+    # Parse the previous .fam to find all samples that were in the aggregate
+    prev_samples = parse_psam(previous_aggregate_paths['fam'])
+
+    # Find samples that are in the previous aggregate but no longer active
+    samples_to_remove = list(set(prev_samples) - set(active_sg_ids))
+
+    return previous_aggregate_paths, samples_to_remove
