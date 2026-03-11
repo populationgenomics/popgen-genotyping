@@ -1,9 +1,8 @@
 """
-Script to generate a deterministic synthetic genotyping manifest CSV for testing.
+Utility functions for testing.
 """
 
 import csv
-import argparse
 from pathlib import Path
 
 
@@ -59,13 +58,3 @@ def generate_manifest(output_path: str | Path, num_samples: int = 10, prefix: st
                 'cpg_sequencing_group_id': sg_id,
                 'cpg_cohort_id': 'COH1003'
             })
-
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Generate synthetic genotyping manifest CSV.')
-    parser.add_argument('output', type=str, help='Output CSV path')
-    parser.add_argument('--num', type=int, default=10, help='Number of samples')
-    parser.add_argument('--prefix', type=str, default='CPGSYN', help='SG ID prefix')
-
-    args = parser.parse_args()
-    generate_manifest(args.output, args.num, args.prefix)

@@ -10,7 +10,7 @@ from popgen_genotyping.metamist_utils import (
     query_previous_aggregate,
     resolve_gtc_path
 )
-from popgen_genotyping.scripts.generate_synthetic_manifest import generate_manifest
+from .utils import generate_manifest
 
 
 @pytest.fixture
