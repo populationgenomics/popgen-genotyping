@@ -3,13 +3,11 @@ Standard utilities and constants for the genotyping pipeline.
 """
 
 import csv
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from cpg_flow.inputs import get_multicohort
 from cpg_flow.workflow import get_workflow
-from cpg_utils import Path as CPGPath
-from cpg_utils import to_path
+from cpg_utils import Path, to_path
 from cpg_utils.config import config_retrieve
 from hailtop.batch.job import BashJob
 
@@ -20,7 +18,7 @@ if TYPE_CHECKING:
 FAM_COLUMN_COUNT: int = 6
 
 
-def get_output_prefix(dataset: 'Dataset', stage_name: str, tmp: bool = False) -> 'CPGPath':
+def get_output_prefix(dataset: 'Dataset', stage_name: str, tmp: bool = False) -> 'Path':
     """
     Standardised output prefix for all stages.
 
@@ -30,11 +28,11 @@ def get_output_prefix(dataset: 'Dataset', stage_name: str, tmp: bool = False) ->
         tmp (bool): If True, returns a path in the 'tmp' category. Defaults to False.
 
     Returns:
-        CPGPath: The resolved cloud path prefix.
+        Path: The resolved cloud path prefix.
     """
-    version: str = config_retrieve(['workflow', 'version'], 'v1')
-    prefix: CPGPath = dataset.prefix(category='tmp' if tmp else 'main')
-    return prefix / get_workflow().name / stage_name / version
+    version: int = config_retrieve(['workflow', 'version'], 1)
+    prefix: Path = dataset.prefix(category='tmp' if tmp else 'main')
+    return prefix / get_workflow().name / stage_name / str(version)
 
 
 def get_sequencing_group_cohort(sequencing_group: 'SequencingGroup') -> 'Cohort':
@@ -58,12 +56,12 @@ def get_sequencing_group_cohort(sequencing_group: 'SequencingGroup') -> 'Cohort'
     raise ValueError(f'Sequencing group {sequencing_group.id} not found in any cohort')
 
 
-def parse_psam(psam_path: str | Path | CPGPath) -> list[str]:
+def parse_psam(psam_path: str | Path) -> list[str]:
     """
     Extract sequencing group IDs from a PLINK2 .psam or PLINK 1.9 .fam file.
 
     Args:
-        psam_path (str | Path | CPGPath): Path to the sample metadata file.
+        psam_path (str | Path): Path to the sample metadata file.
 
     Returns:
         list[str]: List of sample (IID) strings found in the file.
@@ -119,7 +117,7 @@ def register_job(
     Returns:
         BashJob: The initialized Hail Batch BashJob object.
     """
-    j = batch.new_job(name=job_name)
+    j: BashJob = batch.new_job(name=job_name)
     assert isinstance(j, BashJob)
 
     if image:

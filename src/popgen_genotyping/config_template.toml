@@ -19,7 +19,7 @@ status_reporter = 'metamist'
 driver_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/cpg_flow:latest'
 bcftools_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/bcftools:1.23-1'
 plink_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/plink:1.9-20250819-PLINK-2.0-20260228-1'
-version = 'v1'
+version = 1
 
 [popgen_genotyping.gtc_to_bcfs]
 cpu = 2
