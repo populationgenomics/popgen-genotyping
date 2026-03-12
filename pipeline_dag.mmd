@@ -1,9 +1,8 @@
 graph TD
     subgraph Legend
         direction LR
-        L1[Single Sample Stage]:::sample
-        L2[Cohort Stage]:::cohort
-        L3[Multi-Cohort Stage]:::multicohort
+        L1[Cohort Stage]:::cohort
+        L2[Multi-Cohort Stage]:::multicohort
     end
 
     %% DAG Structure
@@ -14,7 +13,6 @@ graph TD
     MCP --> ECD[ExportCohortDatasets]:::multicohort
 
     %% Component styling
-    classDef sample fill:#d4edda,stroke:#28a745,stroke-width:2px;
     classDef cohort fill:#d1ecf1,stroke:#007bff,stroke-width:2px;
     classDef multicohort fill:#f3e5f5,stroke:#6f42c1,stroke-width:2px;
     classDef data fill:#fff,stroke:#333,stroke-dasharray: 5 5;
