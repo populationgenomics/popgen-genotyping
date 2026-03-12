@@ -2,6 +2,8 @@
 This file exists to define all the Stages for the workflow.
 """
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING
 
 from cpg_flow.stage import CohortStage, MultiCohortStage, stage
@@ -23,6 +25,7 @@ if TYPE_CHECKING:
     from cpg_flow.stage import StageInput, StageOutput
     from cpg_flow.targets import Cohort, MultiCohort
     from cpg_utils import Path
+    from hailtop.batch.job import BashJob
 
 
 @stage
@@ -31,41 +34,41 @@ class GtcToBcfs(CohortStage):
     Convert all cohort GTC files to Heavy and Light multi-sample BCFs.
     """
 
-    def expected_outputs(self, cohort: 'Cohort') -> dict[str, 'Path']:
+    def expected_outputs(self, cohort: Cohort) -> dict[str, Path]:
         """
         Define the expected cohort-level multi-sample BCF and metadata outputs.
         """
-        prefix = get_output_prefix(cohort.analysis_dataset, self.name)
+        prefix: Path = get_output_prefix(dataset=cohort.analysis_dataset, stage_name=self.name, tmp=True)
         return {
             'heavy_bcf': prefix / 'cohort.heavy.bcf',
             'light_bcf': prefix / 'cohort.light.bcf',
             'metadata_tsv': prefix / 'cohort_gtc_metadata.tsv',
         }
 
-    def queue_jobs(self, cohort: 'Cohort', _inputs: 'StageInput') -> 'StageOutput':
+    def queue_jobs(self, cohort: Cohort, _inputs: StageInput) -> StageOutput:
         """
         Queue the cohort-level multi-sample GTC to BCF conversion job.
         """
-        outputs = self.expected_outputs(cohort)
+        outputs: dict[str, Path] = self.expected_outputs(cohort)
 
         # Retrieve reference paths from config
-        fasta_ref = config_retrieve(['popgen_genotyping', 'references', 'fasta_ref_path'])
-        bpm_manifest = config_retrieve(['popgen_genotyping', 'references', 'bpm_manifest_path'])
-        egt_cluster = config_retrieve(['popgen_genotyping', 'references', 'egt_cluster_path'])
+        fasta_ref: str = config_retrieve(['popgen_genotyping', 'references', 'fasta_ref_path'])
+        bpm_manifest: str = config_retrieve(['popgen_genotyping', 'references', 'bpm_manifest_path'])
+        egt_cluster: str = config_retrieve(['popgen_genotyping', 'references', 'egt_cluster_path'])
 
         # Resolve GTC mapping (SG_ID -> {gtc, old_name})
-        mapping_data = resolve_cohort_gtc_mapping(cohort)
+        mapping_data: dict[str, dict[str, str]] = resolve_cohort_gtc_mapping(cohort=cohort)
 
-        gtc_paths = [d['gtc'] for d in mapping_data.values()]
+        gtc_paths: list[str] = [d['gtc'] for d in mapping_data.values()]
         # sample_mapping: barcode_pos -> SG_ID
-        sample_mapping = {d['old_name']: sg_id for sg_id, d in mapping_data.items()}
+        sample_mapping: dict[str, str] = {d['old_name']: sg_id for sg_id, d in mapping_data.items()}
 
-        j = run_gtc_to_bcfs(
+        j: BashJob = run_gtc_to_bcfs(
             gtc_paths=gtc_paths,
             sample_mapping=sample_mapping,
-            output_heavy_bcf_path=str(outputs['heavy_bcf']),
-            output_light_bcf_path=str(outputs['light_bcf']),
-            output_metadata_path=str(outputs['metadata_tsv']),
+            output_heavy_bcf_path=str(object=outputs['heavy_bcf']),
+            output_light_bcf_path=str(object=outputs['light_bcf']),
+            output_metadata_path=str(object=outputs['metadata_tsv']),
             bpm_manifest_path=bpm_manifest,
             egt_cluster_path=egt_cluster,
             fasta_ref_path=fasta_ref,
@@ -81,30 +84,30 @@ class BafRegress(CohortStage):
     Estimate sample contamination for the entire cohort using BAFRegress.
     """
 
-    def expected_outputs(self, cohort: 'Cohort') -> dict[str, 'Path']:
+    def expected_outputs(self, cohort: Cohort) -> dict[str, Path]:
         """
         Define the expected BAFRegress output text file for the cohort.
         """
-        prefix = get_output_prefix(cohort.analysis_dataset, self.name)
+        prefix: Path = get_output_prefix(dataset=cohort.analysis_dataset, stage_name=self.name)
         return {
             'bafregress_txt': prefix / 'cohort.BAFRegress.txt',
         }
 
-    def queue_jobs(self, cohort: 'Cohort', inputs: 'StageInput') -> 'StageOutput':
+    def queue_jobs(self, cohort: Cohort, inputs: StageInput) -> StageOutput:
         """
         Queue the cohort-level BAFRegress estimation job.
         """
-        outputs = self.expected_outputs(cohort)
+        outputs: dict[str, Path] = self.expected_outputs(cohort)
 
         # Pull the cohort heavy BCF output from the previous stage
-        heavy_bcf_path = inputs.as_path(cohort, GtcToBcfs, 'heavy_bcf')
+        heavy_bcf_path: Path = inputs.as_path(cohort, GtcToBcfs, 'heavy_bcf')
 
         # Population AF reference mandatory for BAFRegress
-        af_ref_path = config_retrieve(['popgen_genotyping', 'references', 'af_ref_path'])
+        af_ref_path: str = config_retrieve(['popgen_genotyping', 'references', 'af_ref_path'])
 
-        j = run_bafregress(
-            bcf_path=str(heavy_bcf_path),
-            output_path=str(outputs['bafregress_txt']),
+        j: BashJob = run_bafregress(
+            bcf_path=str(object=heavy_bcf_path),
+            output_path=str(object=outputs['bafregress_txt']),
             af_ref_path=af_ref_path,
             job_name=f'BafRegress_{cohort.name}',
         )
@@ -119,36 +122,38 @@ class CohortBcfToPlink(CohortStage):
     Output is stored in tmp.
     """
 
-    def expected_outputs(self, cohort: 'Cohort') -> dict[str, 'Path']:
+    def expected_outputs(self, cohort: Cohort) -> dict[str, Path]:
         """
         Define the expected PLINK 1.9 binary fileset in temporary storage.
         """
         # Store in tmp per requirement
-        prefix = get_output_prefix(cohort.analysis_dataset, self.name, tmp=True)
+        prefix: Path = get_output_prefix(dataset=cohort.analysis_dataset, stage_name=self.name, tmp=True)
         return {
             'bed': prefix / 'cohort.bed',
             'bim': prefix / 'cohort.bim',
             'fam': prefix / 'cohort.fam',
         }
 
-    def queue_jobs(self, cohort: 'Cohort', inputs: 'StageInput') -> 'StageOutput':
+    def queue_jobs(self, cohort: Cohort, inputs: StageInput) -> StageOutput:
         """
         Queue the cohort-level BCF to PLINK 1.9 conversion job.
         """
-        outputs = self.expected_outputs(cohort)
+        outputs: dict[str, Path] = self.expected_outputs(cohort=cohort)
 
         # Pull the cohort light BCF path from GtcToBcfs
-        light_bcf_path = inputs.as_path(cohort, GtcToBcfs, 'light_bcf')
+        light_bcf_path: Path = inputs.as_path(target=cohort, stage=GtcToBcfs, key='light_bcf')
 
         # Fetch reported sex metadata for these SGs
-        full_sex_mapping = query_reported_sex(cohort.analysis_dataset.name)
-        cohort_sg_ids = set(cohort.get_sequencing_group_ids())
-        sex_mapping = {sg_id: sex_code for sg_id, sex_code in full_sex_mapping.items() if sg_id in cohort_sg_ids}
+        full_sex_mapping: dict[str, str] = query_reported_sex(project=cohort.analysis_dataset.name)
+        cohort_sg_ids: set[str] = set(cohort.get_sequencing_group_ids())
+        sex_mapping: dict[str, str] = {
+            sg_id: sex_code for sg_id, sex_code in full_sex_mapping.items() if sg_id in cohort_sg_ids
+        }
 
         # Define the job via the job utility
-        j = run_cohort_bcf_to_plink(
-            bcf_path=str(light_bcf_path),
-            output_prefix=str(outputs['bed']).replace('.bed', ''),
+        j: BashJob = run_cohort_bcf_to_plink(
+            bcf_path=str(object=light_bcf_path),
+            output_prefix=str(object=outputs['bed']).replace('.bed', ''),
             sex_mapping=sex_mapping,
             job_name=f'CohortBcfToPlink_{cohort.name}',
         )
@@ -163,27 +168,27 @@ class MergeCohortPlink(MultiCohortStage):
     Output is stored in tmp.
     """
 
-    def expected_outputs(self, multicohort: 'MultiCohort') -> dict[str, 'Path']:
+    def expected_outputs(self, multicohort: MultiCohort) -> dict[str, Path]:
         """
         Define the expected multi-cohort PLINK 1.9 fileset in temporary storage.
         """
         # Store in tmp per requirement
-        prefix = get_output_prefix(multicohort.analysis_dataset, self.name, tmp=True)
+        prefix: Path = get_output_prefix(dataset=multicohort.analysis_dataset, stage_name=self.name, tmp=True)
         return {
             'bed': prefix / 'merged_cohorts.bed',
             'bim': prefix / 'merged_cohorts.bim',
             'fam': prefix / 'merged_cohorts.fam',
         }
 
-    def queue_jobs(self, multicohort: 'MultiCohort', inputs: 'StageInput') -> 'StageOutput':
+    def queue_jobs(self, multicohort: MultiCohort, inputs: StageInput) -> StageOutput:
         """
         Queue the multi-cohort PLINK 1.9 merge job, incorporating rolling aggregates if configured.
         """
-        outputs = self.expected_outputs(multicohort)
+        outputs: dict[str, Path] = self.expected_outputs(multicohort)
 
         # 1. Gather cohort outputs
-        all_cohort_outputs = inputs.as_dict_by_target(CohortBcfToPlink)
-        cohort_plink_paths = []
+        all_cohort_outputs: dict[str, dict[str, Path]] = inputs.as_dict_by_target(stage=CohortBcfToPlink)
+        cohort_plink_paths: list[dict[str, str]] = []
         for _cohort_id, cohort_outs in all_cohort_outputs.items():
             cohort_plink_paths.append(
                 {
@@ -194,20 +199,20 @@ class MergeCohortPlink(MultiCohortStage):
             )
 
         # 2. Check for rolling aggregate
-        prev_analysis_id = config_retrieve(
+        prev_analysis_id: str | None = config_retrieve(
             ['popgen_genotyping', 'rolling_aggregate', 'previous_analysis_id'], default=None
         )
 
-        previous_aggregate_paths = None
-        samples_to_remove = None
+        previous_aggregate_paths: list[dict[str, str]] | None = None
+        samples_to_remove: list[str] | None = None
 
         if prev_analysis_id:
-            previous_aggregate_paths, samples_to_remove = resolve_rolling_aggregate(prev_analysis_id)
+            previous_aggregate_paths, samples_to_remove = resolve_rolling_aggregate(prev_analysis_id=prev_analysis_id)
 
         # 3. Call merge job
-        j = run_merge_plink(
+        j: BashJob = run_merge_plink(
             cohort_plink_paths=cohort_plink_paths,
-            output_prefix=str(outputs['bed']).replace('.bed', ''),
+            output_prefix=str(object=outputs['bed']).replace('.bed', ''),
             previous_aggregate_paths=previous_aggregate_paths,
             samples_to_remove=samples_to_remove,
             job_name='MergeCohortPlink',
@@ -219,38 +224,41 @@ class MergeCohortPlink(MultiCohortStage):
 @stage(required_stages=[MergeCohortPlink])
 class ExportCohortDatasets(MultiCohortStage):
     """
-    Export the merged cohort to PLINK2 and BCF formats for long-term storage.
+    Export the merged cohort to PLINK2 format for long-term storage.
+    BCF output goes to tmp for analysis, as it is too large for long term storage.
     """
 
-    def expected_outputs(self, multicohort: 'MultiCohort') -> dict[str, 'Path']:
+    def expected_outputs(self, multicohort: MultiCohort) -> dict[str, Path]:
         """
-        Define the expected PLINK2 and BCF outputs in long-term storage.
+        Define the expected PLINK2 outputs to long-term storage.
+        BCF output goes to tmp for analysis, as it is too large for long term storage.
         """
-        prefix = get_output_prefix(multicohort.analysis_dataset, self.name)
+        prefix: Path = get_output_prefix(dataset=multicohort.analysis_dataset, stage_name=self.name)
+        tmp_bcf_prefix: Path = get_output_prefix(dataset=multicohort.analysis_dataset, stage_name=self.name, tmp=True)
         return {
             'pgen': prefix / 'cohort.pgen',
             'pvar': prefix / 'cohort.pvar',
             'psam': prefix / 'cohort.psam',
-            'bcf': prefix / 'cohort.bcf',
+            'bcf': tmp_bcf_prefix / 'cohort.bcf',
         }
 
-    def queue_jobs(self, multicohort: 'MultiCohort', inputs: 'StageInput') -> 'StageOutput':
+    def queue_jobs(self, multicohort: MultiCohort, inputs: StageInput) -> StageOutput:
         """
         Queue the dataset export job using PLINK2.
         """
-        outputs = self.expected_outputs(multicohort)
+        outputs: dict[str, Path] = self.expected_outputs(multicohort=multicohort)
 
         # 1. Pull input from MergeCohortPlink
-        input_plink = inputs.as_dict(multicohort, MergeCohortPlink)
+        input_plink: dict[str, Path] = inputs.as_dict(target=multicohort, stage=MergeCohortPlink)
 
         # 2. Call export job
-        j = run_export_cohort_datasets(
+        j: BashJob = run_export_cohort_datasets(
             input_plink_prefix={
-                'bed': str(input_plink['bed']),
-                'bim': str(input_plink['bim']),
-                'fam': str(input_plink['fam']),
+                'bed': str(object=input_plink['bed']),
+                'bim': str(object=input_plink['bim']),
+                'fam': str(object=input_plink['fam']),
             },
-            output_prefix=str(outputs['pgen']).replace('.pgen', ''),
+            output_prefix=str(object=outputs['pgen']).replace('.pgen', ''),
             job_name='ExportCohortDatasets',
         )
 
