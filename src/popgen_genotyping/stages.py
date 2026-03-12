@@ -4,7 +4,7 @@ This file exists to define all the Stages for the workflow.
 
 from typing import TYPE_CHECKING
 
-from cpg_flow.stage import CohortStage, MultiCohortStage, SequencingGroupStage, stage
+from cpg_flow.stage import CohortStage, MultiCohortStage, stage
 from cpg_utils.config import config_retrieve
 
 from popgen_genotyping.jobs.bafregress_job import run_bafregress
@@ -12,98 +12,110 @@ from popgen_genotyping.jobs.cohort_bcf_to_plink_job import run_cohort_bcf_to_pli
 from popgen_genotyping.jobs.export_cohort_datasets_job import run_export_cohort_datasets
 from popgen_genotyping.jobs.gtc_to_bcfs_job import run_gtc_to_bcfs
 from popgen_genotyping.jobs.merge_plink_job import run_merge_plink
-from popgen_genotyping.metamist_utils import query_reported_sex, resolve_gtc_path, resolve_rolling_aggregate
+from popgen_genotyping.metamist_utils import (
+    query_reported_sex,
+    resolve_cohort_gtc_mapping,
+    resolve_rolling_aggregate,
+)
 from popgen_genotyping.utils import get_output_prefix
 
 if TYPE_CHECKING:
     from cpg_flow.stage import StageInput, StageOutput
-    from cpg_flow.targets import Cohort, MultiCohort, SequencingGroup
+    from cpg_flow.targets import Cohort, MultiCohort
     from cpg_utils import Path
 
 
 @stage
-class GtcToBcfs(SequencingGroupStage):
+class GtcToBcfs(CohortStage):
     """
-    Convert GTC files to Heavy and Light BCFs.
+    Convert all cohort GTC files to Heavy and Light multi-sample BCFs.
     """
 
-    def expected_outputs(self, sequencing_group: 'SequencingGroup') -> dict[str, 'Path']:
+    def expected_outputs(self, cohort: 'Cohort') -> dict[str, 'Path']:
         """
-        Define the expected BCF and metadata outputs for a sequencing group.
+        Define the expected cohort-level multi-sample BCF and metadata outputs.
         """
-        prefix = get_output_prefix(sequencing_group.dataset, self.name)
+        prefix = get_output_prefix(cohort.analysis_dataset, self.name)
         return {
-            'heavy_bcf': prefix / f'{sequencing_group.id}.heavy.bcf',
-            'light_bcf': prefix / f'{sequencing_group.id}.light.bcf',
-            'metadata_tsv': prefix / f'{sequencing_group.id}_gtc_metadata.tsv',
+            'heavy_bcf': prefix / 'cohort.heavy.bcf',
+            'light_bcf': prefix / 'cohort.light.bcf',
+            'metadata_tsv': prefix / 'cohort_gtc_metadata.tsv',
         }
 
-    def queue_jobs(self, sequencing_group: 'SequencingGroup', _inputs: 'StageInput') -> 'StageOutput':
+    def queue_jobs(self, cohort: 'Cohort', _inputs: 'StageInput') -> 'StageOutput':
         """
-        Queue the GTC to BCF conversion job.
+        Queue the cohort-level multi-sample GTC to BCF conversion job.
         """
-        outputs = self.expected_outputs(sequencing_group)
+        outputs = self.expected_outputs(cohort)
 
         # Retrieve reference paths from config
         fasta_ref = config_retrieve(['popgen_genotyping', 'references', 'fasta_ref_path'])
         bpm_manifest = config_retrieve(['popgen_genotyping', 'references', 'bpm_manifest_path'])
         egt_cluster = config_retrieve(['popgen_genotyping', 'references', 'egt_cluster_path'])
 
-        # Resolve GTC path from Metamist
-        gtc_path = resolve_gtc_path(sequencing_group)
+        # Resolve GTC mapping (SG_ID -> {gtc, old_name})
+        mapping_data = resolve_cohort_gtc_mapping(cohort)
+        
+        gtc_paths = [d['gtc'] for d in mapping_data.values()]
+        # sample_mapping: barcode_pos -> SG_ID
+        sample_mapping = {d['old_name']: sg_id for sg_id, d in mapping_data.items()}
 
         j = run_gtc_to_bcfs(
-            gtc_path=gtc_path,
-            sample_id=sequencing_group.id,
+            gtc_paths=gtc_paths,
+            sample_mapping=sample_mapping,
             output_heavy_bcf_path=str(outputs['heavy_bcf']),
             output_light_bcf_path=str(outputs['light_bcf']),
             output_metadata_path=str(outputs['metadata_tsv']),
             bpm_manifest_path=bpm_manifest,
             egt_cluster_path=egt_cluster,
             fasta_ref_path=fasta_ref,
-            job_name=f'GtcToBcfs_{sequencing_group.id}',
+            job_name=f'GtcToBcfs_{cohort.name}',
         )
 
-        return self.make_outputs(sequencing_group, data=outputs, jobs=[j])
+        return self.make_outputs(cohort, data=outputs, jobs=[j])
 
 
 @stage(required_stages=[GtcToBcfs])
-class BafRegress(SequencingGroupStage):
+class BafRegress(CohortStage):
     """
-    Estimate sample contamination using BAFRegress.
+    Estimate sample contamination for the entire cohort using BAFRegress.
     """
 
-    def expected_outputs(self, sequencing_group: 'SequencingGroup') -> dict[str, 'Path']:
+    def expected_outputs(self, cohort: 'Cohort') -> dict[str, 'Path']:
         """
-        Define the expected BAFRegress output text file.
+        Define the expected BAFRegress output text file for the cohort.
         """
-        prefix = get_output_prefix(sequencing_group.dataset, self.name)
+        prefix = get_output_prefix(cohort.analysis_dataset, self.name)
         return {
-            'bafregress_txt': prefix / f'{sequencing_group.id}.BAFRegress.txt',
+            'bafregress_txt': prefix / 'cohort.BAFRegress.txt',
         }
 
-    def queue_jobs(self, sequencing_group: 'SequencingGroup', inputs: 'StageInput') -> 'StageOutput':
+    def queue_jobs(self, cohort: 'Cohort', inputs: 'StageInput') -> 'StageOutput':
         """
-        Queue the BAFRegress estimation job.
+        Queue the cohort-level BAFRegress estimation job.
         """
-        outputs = self.expected_outputs(sequencing_group)
+        outputs = self.expected_outputs(cohort)
 
-        # Pull the heavy BCF output from the previous stage
-        heavy_bcf_path = inputs.as_path(sequencing_group, GtcToBcfs, 'heavy_bcf')
+        # Pull the cohort heavy BCF output from the previous stage
+        heavy_bcf_path = inputs.as_path(cohort, GtcToBcfs, 'heavy_bcf')
+        
+        # Population AF reference mandatory for BAFRegress
+        af_ref_path = config_retrieve(['popgen_genotyping', 'references', 'af_ref_path'])
 
         j = run_bafregress(
             bcf_path=str(heavy_bcf_path),
             output_path=str(outputs['bafregress_txt']),
-            job_name=f'BafRegress_{sequencing_group.id}',
+            af_ref_path=af_ref_path,
+            job_name=f'BafRegress_{cohort.name}',
         )
 
-        return self.make_outputs(sequencing_group, data=outputs, jobs=[j])
+        return self.make_outputs(cohort, data=outputs, jobs=[j])
 
 
 @stage(required_stages=[GtcToBcfs])
 class CohortBcfToPlink(CohortStage):
     """
-    Convert all light BCFs in a cohort to PLINK 1.9 format and merge them.
+    Convert the cohort-level light BCF to PLINK 1.9 format.
     Output is stored in tmp.
     """
 
@@ -121,24 +133,21 @@ class CohortBcfToPlink(CohortStage):
 
     def queue_jobs(self, cohort: 'Cohort', inputs: 'StageInput') -> 'StageOutput':
         """
-        Queue the cohort-level BCF to PLINK 1.9 conversion and merge job.
+        Queue the cohort-level BCF to PLINK 1.9 conversion job.
         """
         outputs = self.expected_outputs(cohort)
 
-        # 1. Pull light BCF paths from GtcToBcfs for all SGs in this cohort
-        sg_outputs = inputs.as_dict_by_target(GtcToBcfs)
-        cohort_sg_ids = set(cohort.get_sequencing_group_ids())
+        # Pull the cohort light BCF path from GtcToBcfs
+        light_bcf_path = inputs.as_path(cohort, GtcToBcfs, 'light_bcf')
 
-        bcf_paths = {sg_id: str(outs['light_bcf']) for sg_id, outs in sg_outputs.items() if sg_id in cohort_sg_ids}
-
-        # 2. Fetch reported sex metadata for these SGs
+        # Fetch reported sex metadata for these SGs
         full_sex_mapping = query_reported_sex(cohort.analysis_dataset.name)
-        # Filter to include only those in the current cohort
+        cohort_sg_ids = set(cohort.get_sequencing_group_ids())
         sex_mapping = {sg_id: sex_code for sg_id, sex_code in full_sex_mapping.items() if sg_id in cohort_sg_ids}
 
         # Define the job via the job utility
         j = run_cohort_bcf_to_plink(
-            bcf_paths=bcf_paths,
+            bcf_path=str(light_bcf_path),
             output_prefix=str(outputs['bed']).replace('.bed', ''),
             sex_mapping=sex_mapping,
             job_name=f'CohortBcfToPlink_{cohort.name}',
@@ -172,7 +181,7 @@ class MergeCohortPlink(MultiCohortStage):
         """
         outputs = self.expected_outputs(multicohort)
 
-        # 1. Gather new cohort outputs
+        # 1. Gather cohort outputs
         all_cohort_outputs = inputs.as_dict_by_target(CohortBcfToPlink)
         cohort_plink_paths = []
         for _cohort_id, cohort_outs in all_cohort_outputs.items():

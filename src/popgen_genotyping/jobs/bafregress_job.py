@@ -13,6 +13,7 @@ from popgen_genotyping.utils import register_job
 def run_bafregress(
     bcf_path: str,
     output_path: str,
+    af_ref_path: str,
     job_name: str = 'bafregress',
 ) -> 'BashJob':
     """
@@ -21,6 +22,7 @@ def run_bafregress(
     Args:
         bcf_path (str): Cloud path to input BCF file.
         output_path (str): Cloud path to output BAFRegress.txt file.
+        af_ref_path (str): Cloud path to population AF reference VCF.
         job_name (str): Name for the Hail Batch job. Defaults to 'bafregress'.
 
     Returns:
@@ -39,6 +41,7 @@ def run_bafregress(
 
     # Read the input BCF file with index.
     bcf_file = b.read_input_group(bcf=bcf_path, csi=f'{bcf_path}.csi')
+    af_ref = b.read_input_group(vcf=af_ref_path, tbi=f'{af_ref_path}.tbi')
 
     # Explicitly define the output resource to avoid dynamic attribute confusion
     j.declare_resource_group(output={'txt': '{root}.txt'})
@@ -49,6 +52,8 @@ def run_bafregress(
 
         # Run BAFRegress and redirect stdout directly to the Hail resource
         bcftools +BAFregress \\
+            -a "{af_ref.vcf}" \\
+            --tag AF \\
             "{bcf_file.bcf}" > {j.output.txt}
         """
     )

@@ -1,9 +1,7 @@
 """
-Job logic for merging individual BCFs into a cohort PLINK 1.9 dataset.
+Job logic for converting a cohort-level multi-sample BCF into a PLINK 1.9 dataset.
 """
 
-import json
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from cpg_utils.config import config_retrieve
@@ -15,22 +13,22 @@ if TYPE_CHECKING:
 
 
 def run_cohort_bcf_to_plink(
-    bcf_paths: dict[str, str],
+    bcf_path: str,
     output_prefix: str,
     sex_mapping: dict[str, str] | None = None,
     job_name: str = 'cohort_bcf_to_plink',
 ) -> 'BashJob':
     """
-    Run the PLINK 1.9 conversion and merging orchestration script.
+    Directly convert a multi-sample cohort BCF to PLINK 1.9 format using PLINK2.
 
     Args:
-        bcf_paths (dict[str, str]): Mapping of SG ID to cloud BCF path.
-        output_prefix (str): Cloud prefix for the merged PLINK 1.9 files.
+        bcf_path (str): Cloud path to the cohort-level multi-sample BCF.
+        output_prefix (str): Cloud prefix for the output PLINK 1.9 files.
         sex_mapping (dict[str, str], optional): Mapping of SG ID to sex code (1 or 2).
         job_name (str): Name for the Hail Batch job.
 
     Returns:
-        Job: A Hail Batch job object.
+        BashJob: A Hail Batch job object.
     """
     b = get_batch()
     j = register_job(
@@ -38,21 +36,14 @@ def run_cohort_bcf_to_plink(
         job_name=job_name,
         config_path=['popgen_genotyping', 'cohort_bcf_to_plink'],
         image=config_retrieve(['workflow', 'plink_image']),
-        default_cpu=8,
-        default_memory='highmem',
+        default_cpu=4,
         default_storage='50G',
     )
 
-    # 1. Stage the orchestration script
-    script_path = Path(__file__).parent.parent / 'scripts' / 'vcf_to_plink.py'
-    vcf_to_plink_script = b.read_input(str(script_path))
+    # 1. Stage the cohort BCF and index
+    bcf_file = b.read_input_group(bcf=bcf_path, csi=f'{bcf_path}.csi')
 
-    # 2. Stage all BCFs and indices
-    staged_bcfs = {}
-    for sg_id, cloud_path in bcf_paths.items():
-        staged_bcfs[sg_id] = b.read_input_group(bcf=cloud_path, csi=f'{cloud_path}.csi')
-
-    # 3. Define output resource group
+    # 2. Define output resource group
     j.declare_resource_group(
         output_plink={
             'bed': '{root}.bed',
@@ -61,36 +52,36 @@ def run_cohort_bcf_to_plink(
         }
     )
 
-    # 4. Construct local manifest and execute script
-    manifest_data = {'manifest': {sg_id: str(resource.bcf) for sg_id, resource in staged_bcfs.items()}}
-    manifest_json = json.dumps(manifest_data)
-
-    # Prepare command components
-    command_lines = ['set -ex', f"echo '{manifest_json}' > local_manifest.json"]
-
-    script_args = [
-        f'python3 {vcf_to_plink_script}',
-        '--manifest local_manifest.json',
-        f'--out-prefix {j.output_plink}',
-        '--threads 8',
-    ]
-
-    # 5. Handle sex metadata if provided
+    # 3. Handle sex metadata if provided
+    update_sex_cmd = ""
     if sex_mapping:
         sex_tsv_lines = []
         for sg_id, sex_code in sex_mapping.items():
-            # PLINK 1.9 format: FamilyID(0) SampleID Sex
+            # PLINK format: FamilyID(0) SampleID Sex
             sex_tsv_lines.append(f'0\t{sg_id}\t{sex_code}')
+        
+        sex_tsv_content = '\\n'.join(sex_tsv_lines)
+        j.command(f'echo -e "{sex_tsv_content}" > sex_metadata.tsv')
+        update_sex_cmd = "--update-sex sex_metadata.tsv"
 
-        sex_tsv_content = '\n'.join(sex_tsv_lines)
-        command_lines.append(f'echo -e "{sex_tsv_content}" > sex_metadata.tsv')
-        script_args.append('--sex-tsv sex_metadata.tsv')
+    # 4. Direct conversion using PLINK2
+    j.command(
+        f"""
+        set -ex
 
-    command_lines.append(' '.join(script_args))
+        plink2 \\
+            --bcf {bcf_file.bcf} \\
+            --max-alleles 2 \\
+            --split-par hg38 \\
+            --set-all-var-ids '@:#:$r:$a' \\
+            --allow-extra-chr \\
+            {update_sex_cmd} \\
+            --make-bed \\
+            --out {j.output_plink}
+        """
+    )
 
-    j.command('\n'.join(command_lines))
-
-    # 6. Write outputs back to cloud (using output_prefix which stages.py will set to tmp)
+    # 5. Write outputs back to cloud
     b.write_output(j.output_plink, output_prefix)
 
     return j

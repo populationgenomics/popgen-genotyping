@@ -1,186 +1,169 @@
 #!/usr/bin/env python3  # noqa: EXE001
 
 """
-Reproduction script for the full genotyping pipeline:
-1. Generate synthetic GTC files.
-2. Convert GTC to BCF using bcftools:1.23-1 (matching gtc_to_bcfs_job.py).
-3. BAFRegress contamination estimation.
-4. Convert BCF to PLINK 1.9 and merge using official PLINK image.
-5. Export to PLINK2 and BCF formats.
+Updated reproduction script for the refactored cohort-level genotyping pipeline.
+Optimized for speed using /dev/shm for sort and 10 samples.
+Includes all stages: GTC -> multi-sample BCF -> BAFRegress -> cohort PLINK 1.9 -> PLINK2/BCF.
 """
 
-import json
+import os
 import subprocess
+import time
 from pathlib import Path
-from typing import Any
 
-# Paths
-ROOT: Path = Path(__file__).parent.parent.parent
-LOCAL_DIR: Path = ROOT / 'test' / 'local'
-DATA_DIR: Path = LOCAL_DIR / 'data'
-REF_DIR: Path = LOCAL_DIR / 'reference'
-OUTPUT_DIR: Path = LOCAL_DIR / 'output' / 'reproduce'
-GTC_DIR: Path = DATA_DIR / 'gtc'
+# --- Configuration ---
+BCFTOOLS_IMAGE = 'australia-southeast1-docker.pkg.dev/cpg-common/images/bcftools:1.23-1'
+PLINK_IMAGE = 'australia-southeast1-docker.pkg.dev/cpg-common/images/plink:1.9-20250819-PLINK-2.0-20260228-1'
 
-# Docker Images
-BCFTOOLS_IMAGE: str = 'australia-southeast1-docker.pkg.dev/cpg-common/images/bcftools:1.23-1'
-PLINK_IMAGE: str = 'australia-southeast1-docker.pkg.dev/cpg-common/images/plink:1.9-20250819-PLINK-2.0-20260228-1'
+ROOT = Path(__file__).parent.parent.parent
+LOCAL_DIR = ROOT / 'test' / 'local'
+DATA_DIR = LOCAL_DIR / 'reproduce_cohort'
+SITES_FILE = ROOT / 'test' / 'data' / 'sites.txt.gz'
 
-# Reference Files
-BPM_MANIFEST: str = '/data/test/local/reference/GDA-8v1-0_D2.bpm'
-EGT_CLUSTER: str = '/data/test/local/reference/GDA-8v1-0_D1_ClusterFile.egt'
-FASTA_REF: str = '/data/test/local/reference/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna'
+# Reference files on host
+BPM_HOST = LOCAL_DIR / 'reference' / 'GDA-8v1-0_D2.bpm'
+EGT_HOST = LOCAL_DIR / 'reference' / 'GDA-8v1-0_D1_ClusterFile.egt'
+FASTA_HOST = LOCAL_DIR / 'reference' / 'GCA_000001405.15_GRCh38_no_alt_analysis_set.fna'
 
+# --- Utilities ---
 
-def run_cmd(cmd: list[str] | str, check: bool = True) -> None:
-    """
-    Execute a shell command using subprocess.
+def run_docker(image, command, entrypoint=None, shm_size='8g'):
+    """Run a command inside a Docker container with large SHM size."""
+    entrypoint_arg = f'--entrypoint {entrypoint}' if entrypoint else ''
+    full_cmd = (
+        f'docker run --rm '
+        f'--shm-size={shm_size} '
+        f'-v {ROOT}:/data '
+        f'-w /data '
+        f'{entrypoint_arg} '
+        f'{image} '
+        f'{command}'
+    )
+    print(f'Running: {full_cmd}')
+    subprocess.run(full_cmd, shell=True, check=True)
 
-    Args:
-        cmd (list[str] | str): The command to run.
-        check (bool): If True, raise CalledProcessError on non-zero exit. Defaults to True.
-    """
-    print(f"Running: {' '.join(cmd) if isinstance(cmd, list) else cmd}")
-    subprocess.run(cmd, shell=isinstance(cmd, str), check=check)  # noqa: S603
+# --- Execution ---
 
-
-def run_docker(image: str, command: str, entrypoint: str | None = None) -> None:
-    """
-    Run a command inside a Docker container.
-
-    Args:
-        image (str): Docker image name.
-        command (str): Command to execute inside the container.
-        entrypoint (str, optional): Custom entrypoint for the container.
-    """
-    docker_cmd: list[str] = [
-        'docker', 'run', '--rm',
-        '-v', f'{ROOT}:/data',
-        '-w', '/data'
-    ]
-    if entrypoint:
-        docker_cmd.extend(['--entrypoint', entrypoint])
-
-    docker_cmd.append(image)
-
-    if entrypoint == 'bash':
-        docker_cmd.extend(['-c', f'set -ex; {command}'])
-    else:
-        docker_cmd.append(command)
-
-    run_cmd(docker_cmd)
-
-
-def main() -> None:
-    """
-    Execute the full genotyping pipeline reproduction.
-    """
-    # 1. Prepare Directories
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    (OUTPUT_DIR / 'bcfs').mkdir(exist_ok=True)
-    (OUTPUT_DIR / 'plink').mkdir(exist_ok=True)
-
-    # 2. Generate Synthetic GTCs
-    samples: list[str] = ['CPGSYN001', 'CPGSYN002']
-    num_snps: int = 100000  # Reduced for speed in reproduction
-
-    for sg_id in samples:
-        gtc_path: Path = GTC_DIR / f'{sg_id}.gtc'
+def main():
+    os.makedirs(DATA_DIR, exist_ok=True)
+    
+    # 1. Generate 10 synthetic samples
+    samples = [f'CPGSYN{i:03d}' for i in range(1, 11)]
+    gtc_paths = []
+    
+    num_snps = 100000 
+    
+    print('>>> Generating synthetic GTC files (10 samples)...')
+    for sample in samples:
+        gtc_path = DATA_DIR / f'{sample}.gtc'
         if not gtc_path.exists():
-            print(f'\n>>> Generating GTC for {sg_id} <<<')
-            run_cmd([
-                'python3', str(ROOT / 'test' / 'scripts' / 'generate_synthetic_gtc.py'),
-                str(gtc_path),
-                '--num', str(num_snps),
-                '--name', 'GDA-8v1-0_D2.bpm'
-            ])
+            subprocess.run(
+                f'python3 test/scripts/generate_synthetic_gtc.py {gtc_path} --num {num_snps} --contam 0.05',
+                shell=True, check=True, capture_output=True
+            )
+        gtc_paths.append(f'/data/{gtc_path.relative_to(ROOT)}')
 
-    # 3. GTC to BCF (matching gtc_to_bcfs_job.py)
-    for sg_id in samples:
-        print(f'\n>>> GTC to BCF for {sg_id} <<<')
-        gtc_rel: str = f'/data/test/local/data/gtc/{sg_id}.gtc'
-        heavy_bcf: str = f'/data/test/local/output/reproduce/bcfs/{sg_id}.heavy.bcf'
-        light_bcf: str = f'/data/test/local/output/reproduce/bcfs/{sg_id}.light.bcf'
-        metadata_tsv: str = f'/data/test/local/output/reproduce/bcfs/{sg_id}_metadata.tsv'
+    # 2. Create pop_ref for BAFRegress (Only once)
+    af_vcf_gz = DATA_DIR / 'pop_ref.vcf.gz'
+    if not af_vcf_gz.exists():
+        print('\n>>> Generating population AF reference (First time only)...')
+        af_vcf = DATA_DIR / 'pop_ref.vcf'
+        subprocess.run(
+            f'python3 test/scripts/generate_af_reference.py {SITES_FILE} {af_vcf}',
+            shell=True, check=True, capture_output=True
+        )
+        # Filter pop_ref to match num_snps
+        subprocess.run(f'head -n {num_snps + 4} {af_vcf} > {af_vcf}.tmp && mv {af_vcf}.tmp {af_vcf}', shell=True, check=True)
+        
+        run_docker(BCFTOOLS_IMAGE, f"bash -c 'bcftools view /data/{af_vcf.relative_to(ROOT)} -O z -o /data/{af_vcf_gz.relative_to(ROOT)} && bcftools index /data/{af_vcf_gz.relative_to(ROOT)}'")
+        if af_vcf.exists():
+            os.remove(af_vcf)
 
-        cmd: str = f"""
-        mkdir -p /tmp/bcftools-tmp && \\
-        bcftools +gtc2vcf \\
-            --no-version \\
-            --bpm {BPM_MANIFEST} \\
-            --egt {EGT_CLUSTER} \\
-            --fasta-ref {FASTA_REF} \\
-            --extra {metadata_tsv} \\
-            {gtc_rel} | \\
-        bcftools norm -m -both --no-version -c x -f {FASTA_REF} | \\
-        bcftools sort -T /tmp/bcftools-tmp | \\
-        bcftools reheader -n {sg_id} | \\
-        bcftools view -O b -o {heavy_bcf} --write-index
+    # 3. GTC to multi-sample cohort BCF
+    print('\n>>> GtcToBcfs (Cohort Level) <<<')
+    heavy_bcf = DATA_DIR / 'cohort.heavy.bcf'
+    light_bcf = DATA_DIR / 'cohort.light.bcf'
+    
+    mapping_file = DATA_DIR / 'reheader_map.txt'
+    with open(mapping_file, 'w') as f:
+        for s in samples:
+            f.write(f'{s} {s}\n')
 
-        bcftools annotate --no-version -x ^FORMAT/GT,FORMAT/GQ {heavy_bcf} \\
-        -O b -o {light_bcf} --write-index
-        """
-        run_docker(BCFTOOLS_IMAGE, cmd, entrypoint='bash')
-
-    # 3.5 BAFRegress (matching BafRegress stage)
-    for sg_id in samples:
-        print(f'\n>>> BAFRegress for {sg_id} <<<')
-        heavy_bcf: str = f'/data/test/local/output/reproduce/bcfs/{sg_id}.heavy.bcf'
-        tagged_bcf: str = f'/data/test/local/output/reproduce/bcfs/{sg_id}.tagged.bcf'
-        baf_out: str = f'/data/test/local/output/reproduce/bcfs/{sg_id}.BAFRegress.txt'
-
-        # Calculate AC/AN tags which BAFRegress needs for allele frequency
-        fill_cmd: str = f'bcftools +fill-tags "{heavy_bcf}" -O b -o "{tagged_bcf}" -- -t AC,AN'
-        run_docker(BCFTOOLS_IMAGE, fill_cmd, entrypoint='bash')
-
-        baf_cmd: str = f'bcftools +BAFregress "{tagged_bcf}" > "{baf_out}"'
-        run_docker(BCFTOOLS_IMAGE, baf_cmd, entrypoint='bash')
-
-    # 4. Cohort Merge (PLINK 1.9)
-    print('\n>>> Merging into Cohort (PLINK 1.9) <<<')
-    manifest: dict[str, Any] = {
-        'manifest': {
-            sg_id: f'/data/test/local/output/reproduce/bcfs/{sg_id}.light.bcf'
-            for sg_id in samples
-        }
-    }
-    manifest_path: Path = OUTPUT_DIR / 'manifest.json'
-    with open(manifest_path, 'w', encoding='utf-8') as f:
-        json.dump(manifest, f, indent=4)
-
-    sex_tsv: Path = OUTPUT_DIR / 'sex.tsv'
-    with open(sex_tsv, 'w', encoding='utf-8') as f:
-        for sg_id in samples:
-            f.write(f'0\t{sg_id}\t1\n')
-
-    # Run vcf_to_plink.py via official PLINK image
-    rel_manifest: str = '/data/test/local/output/reproduce/manifest.json'
-    rel_sex: str = '/data/test/local/output/reproduce/sex.tsv'
-    rel_out_prefix: str = '/data/test/local/output/reproduce/plink/cohort_merged'
-
-    convert_cmd: str = (
-        f'python3 /data/src/popgen_genotyping/scripts/vcf_to_plink.py '
-        f'--manifest {rel_manifest} --sex-tsv {rel_sex} --out-prefix {rel_out_prefix} --threads 4'
+    gtc_args = ' '.join(gtc_paths)
+    
+    # Internal paths
+    bpm_int = f'/data/{BPM_HOST.relative_to(ROOT)}'
+    egt_int = f'/data/{EGT_HOST.relative_to(ROOT)}'
+    fasta_int = f'/data/{FASTA_HOST.relative_to(ROOT)}'
+    map_int = f'/data/{mapping_file.relative_to(ROOT)}'
+    heavy_int = f'/data/{heavy_bcf.relative_to(ROOT)}'
+    light_int = f'/data/{light_bcf.relative_to(ROOT)}'
+    
+    gtc_cmd = (
+        f"bash -c 'mkdir -p /dev/shm/bcftools-tmp && "
+        f"bcftools +gtc2vcf --do-not-check-bpm -b {bpm_int} -e {egt_int} -f {fasta_int} {gtc_args} | "
+        f"bcftools norm -m -both --no-version -c x -f {fasta_int} | "
+        f"bcftools sort -T /dev/shm/bcftools-tmp | "
+        f"bcftools reheader -s {map_int} | "
+        f"bcftools view -O b -o {heavy_int} --write-index && "
+        f"bcftools annotate --no-version -x ^FORMAT/GT,FORMAT/GQ {heavy_int} -O b -o {light_int} --write-index'"
     )
-    run_docker(PLINK_IMAGE, convert_cmd, entrypoint='bash')
+    run_docker(BCFTOOLS_IMAGE, gtc_cmd)
 
-    # 5. Export Datasets (PLINK2 & BCF)
-    print('\n>>> Exporting Datasets (PLINK2 & BCF) <<<')
-    export_dir: Path = OUTPUT_DIR / 'export'
-    export_dir.mkdir(exist_ok=True)
-
-    rel_merged_bfile: str = '/data/test/local/output/reproduce/plink/cohort_merged'
-    rel_export_prefix: str = '/data/test/local/output/reproduce/export/cohort'
-
-    export_cmd: str = (
-        f'plink2 --bfile {rel_merged_bfile} --allow-extra-chr '
-        f'--make-pgen --export bcf --out {rel_export_prefix}'
+    # 4. BAFRegress (Cohort Level)
+    print('\n>>> BafRegress (Cohort Level) <<<')
+    baf_out_host = DATA_DIR / 'cohort.BAFRegress.txt'
+    af_ref_int = f'/data/{af_vcf_gz.relative_to(ROOT)}'
+    baf_out_int = f'/data/{baf_out_host.relative_to(ROOT)}'
+    
+    baf_cmd = (
+        f"bash -c 'bcftools +BAFregress -a {af_ref_int} --tag AF {heavy_int} > {baf_out_int}'"
     )
-    run_docker(PLINK_IMAGE, export_cmd, entrypoint='bash')
+    run_docker(BCFTOOLS_IMAGE, baf_cmd)
+    
+    print('\nBAFRegress Results (First 5 lines):')
+    with open(baf_out_host) as f:
+        for _ in range(5):
+            print(f.readline(), end='')
 
-    print('\nFull pipeline reproduction complete!')
+    # 5. Cohort BCF to PLINK 1.9
+    print('\n>>> CohortBcfToPlink (Simplified) <<<')
+    plink1_prefix = DATA_DIR / 'cohort_plink1'
+    plink1_prefix_int = f'/data/{plink1_prefix.relative_to(ROOT)}'
+    
+    sex_mapping_file = DATA_DIR / 'sex_mapping.txt'
+    with open(sex_mapping_file, 'w') as f:
+        for s in samples:
+            f.write(f'0 {s} 1\n')
+    sex_mapping_int = f'/data/{sex_mapping_file.relative_to(ROOT)}'
 
+    plink1_cmd = (
+        f"bash -c 'plink2 --bcf {light_int} "
+        f"--max-alleles 2 --split-par hg38 --set-all-var-ids \"@:#:\\$r:\\$a\" "
+        f"--update-sex {sex_mapping_int} "
+        f"--allow-extra-chr --make-bed --out {plink1_prefix_int}'"
+    )
+    run_docker(PLINK_IMAGE, plink1_cmd)
+
+    # 6. ExportCohortDatasets (PLINK 1.9 -> PLINK2/BCF)
+    print('\n>>> ExportCohortDatasets (PLINK 1.9 -> PLINK2/BCF) <<<')
+    plink2_prefix = DATA_DIR / 'cohort_plink2'
+    plink2_prefix_int = f'/data/{plink2_prefix.relative_to(ROOT)}'
+    final_bcf = DATA_DIR / 'cohort.final.bcf'
+    final_bcf_int = f'/data/{final_bcf.relative_to(ROOT)}'
+
+    export_cmd = (
+        f"bash -c 'plink2 --bfile {plink1_prefix_int} "
+        f"--allow-extra-chr --make-pgen --out {plink2_prefix_int} && "
+        f"plink2 --pfile {plink2_prefix_int} --allow-extra-chr --export bcf --out {plink2_prefix_int} && "
+        f"mv {plink2_prefix_int}.bcf {final_bcf_int}'"
+    )
+    run_docker(PLINK_IMAGE, export_cmd)
+    
+    # Index with bcftools
+    run_docker(BCFTOOLS_IMAGE, f"bcftools index {final_bcf_int}")
+
+    print('\nRefactored pipeline reproduction (Full DAG) complete!')
 
 if __name__ == '__main__':
-    print('Ensure Docker Desktop is running (open -a Docker)')
     main()

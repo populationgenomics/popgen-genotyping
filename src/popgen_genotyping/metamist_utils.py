@@ -122,6 +122,66 @@ def parse_genotyping_manifest(manifest_path: str) -> dict[str, str]:
     return sg_to_gtc
 
 
+def parse_genotyping_manifest_for_reheader(manifest_path: str) -> dict[str, dict[str, str]]:
+    """
+    Parse manifest to get both GTC path and reheadering mapping.
+
+    Args:
+        manifest_path (str): Cloud path to the manifest CSV.
+
+    Returns:
+        dict[str, dict[str, str]]: Mapping of SG ID to {'gtc': path, 'old_name': barcode_pos}
+    """
+    mapping: dict[str, dict[str, str]] = {}
+    with to_path(manifest_path).open() as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            sg_id: str | None = row.get('cpg_sequencing_group_id')
+            gtc_path: str | None = row.get('cpg_gcp_filepath')
+            barcode: str | None = row.get('sentrix_barcode_a')
+            pos: str | None = row.get('sentrix_position_a')
+            
+            if sg_id and gtc_path and barcode and pos:
+                mapping[sg_id] = {
+                    'gtc': gtc_path,
+                    'old_name': f'{barcode}_{pos}'
+                }
+
+    return mapping
+
+
+def resolve_cohort_gtc_mapping(cohort: 'Cohort') -> dict[str, dict[str, str]]:
+    """
+    Resolve GTC paths and reheadering names for all sequencing groups in a cohort.
+
+    Args:
+        cohort (Cohort): The cohort to resolve.
+
+    Returns:
+        dict[str, dict[str, str]]: Mapping of SG ID to {'gtc': path, 'old_name': barcode_pos}
+    """
+    # 1. Query manifests for the project
+    all_manifests: list[dict[str, Any]] = query_genotyping_manifests(cohort.analysis_dataset.name)
+
+    # 2. Find manifest with the cohort ID in its basename
+    matching_manifests: list[dict[str, Any]] = [
+        m for m in all_manifests if cohort.id in str(m.get('basename', ''))
+    ]
+
+    if not matching_manifests:
+        raise ValueError(f'No manifest found for cohort {cohort.id}')
+
+    matching_manifests.sort(key=lambda x: int(x.get('id', 0)), reverse=True)
+    manifest_path: str = matching_manifests[0]['path']
+
+    # 3. Parse manifest
+    mapping: dict[str, dict[str, str]] = parse_genotyping_manifest_for_reheader(manifest_path)
+    
+    # 4. Filter to only include SGs active in this cohort
+    cohort_sg_ids = set(cohort.get_sequencing_group_ids())
+    return {sg_id: data for sg_id, data in mapping.items() if sg_id in cohort_sg_ids}
+
+
 def resolve_gtc_path(sequencing_group: 'SequencingGroup') -> str:
     """
     Resolve the GTC cloud path for a sequencing group from Metamist manifests.
