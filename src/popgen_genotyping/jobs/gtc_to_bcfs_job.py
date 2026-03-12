@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from cpg_utils.config import config_retrieve
 from cpg_utils.hail_batch import get_batch
+
 from popgen_genotyping.utils import register_job
 
 if TYPE_CHECKING:
@@ -41,7 +42,14 @@ def run_gtc_to_bcfs(
         BashJob: The queued Hail Batch job.
     """
     b = get_batch()
-    j = register_job(b, job_name, 'bcftools')
+    j = register_job(
+        batch=b,
+        job_name=job_name,
+        config_path=['popgen_genotyping', 'gtc_to_bcfs'],
+        image=config_retrieve(['workflow', 'bcftools_image']),
+        default_cpu=2,
+        default_storage='50G',
+    )
 
     # Read reference files into the job's local storage
     bpm_file = b.read_input(bpm_manifest_path)
@@ -53,18 +61,18 @@ def run_gtc_to_bcfs(
 
     # Read all GTC files
     gtc_files = [b.read_input(p) for p in gtc_paths]
-    gtc_arg = " ".join([str(f) for f in gtc_files])
+    gtc_arg = ' '.join([str(f) for f in gtc_files])
 
     # Create reheader mapping file content
-    mapping_content = "\n".join([f"{old} {new}" for old, new in sample_mapping.items()])
-    
+    mapping_content = '\n'.join([f'{old} {new}' for old, new in sample_mapping.items()])
+
     # Building the command
     j.command(
         f"""
         set -ex
 
         mkdir -p /dev/shm/bcftools-tmp
-        
+
         # Create reheader mapping file inside the job
         cat <<EOF > reheader_map.txt
 {mapping_content}
