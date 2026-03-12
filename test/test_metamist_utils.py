@@ -8,7 +8,7 @@ from popgen_genotyping.metamist_utils import (
     query_genotyping_manifests,
     parse_genotyping_manifest,
     query_previous_aggregate,
-    resolve_gtc_path
+    resolve_gtc_path,
 )
 
 
@@ -17,11 +17,22 @@ def generate_manifest(output_path, num_samples=10, prefix='CPGSYN'):
     Generate a synthetic manifest CSV with all required columns.
     """
     import csv  # noqa: PLC0415
+
     headers = [
-        'file_name', 'sample_sheet_id', 'sample_id', 'md5sum', 'bbv_barcode',
-        'sentrix_barcode_a', 'sentrix_position_a', 'sample_plate', 'sample_well',
-        'sample_plate_position', 'cpg_sample_id_internal', 'cpg_gcp_filepath',
-        'cpg_sequencing_group_id', 'cpg_cohort_id'
+        'file_name',
+        'sample_sheet_id',
+        'sample_id',
+        'md5sum',
+        'bbv_barcode',
+        'sentrix_barcode_a',
+        'sentrix_position_a',
+        'sample_plate',
+        'sample_well',
+        'sample_plate_position',
+        'cpg_sample_id_internal',
+        'cpg_gcp_filepath',
+        'cpg_sequencing_group_id',
+        'cpg_cohort_id',
     ]
 
     with open(output_path, 'w', newline='') as f:
@@ -29,22 +40,24 @@ def generate_manifest(output_path, num_samples=10, prefix='CPGSYN'):
         writer.writeheader()
         for i in range(1, num_samples + 1):
             sg_id = f'{prefix}{i:03d}'
-            writer.writerow({
-                'file_name': 'barcode_pos.gtc',
-                'sample_sheet_id': '123',
-                'sample_id': f'AGDB{i:05d}',
-                'md5sum': 'md5',
-                'bbv_barcode': '123',
-                'sentrix_barcode_a': 'barcode',
-                'sentrix_position_a': 'pos',
-                'sample_plate': 'plate',
-                'sample_well': 'well',
-                'sample_plate_position': 'pos',
-                'cpg_sample_id_internal': f'INT{i}',
-                'cpg_gcp_filepath': f'gs://cpg-test-main/gtc/{sg_id}.gtc',
-                'cpg_sequencing_group_id': sg_id,
-                'cpg_cohort_id': 'COH1'
-            })
+            writer.writerow(
+                {
+                    'file_name': 'barcode_pos.gtc',
+                    'sample_sheet_id': '123',
+                    'sample_id': f'AGDB{i:05d}',
+                    'md5sum': 'md5',
+                    'bbv_barcode': '123',
+                    'sentrix_barcode_a': 'barcode',
+                    'sentrix_position_a': 'pos',
+                    'sample_plate': 'plate',
+                    'sample_well': 'well',
+                    'sample_plate_position': 'pos',
+                    'cpg_sample_id_internal': f'INT{i}',
+                    'cpg_gcp_filepath': f'gs://cpg-test-main/gtc/{sg_id}.gtc',
+                    'cpg_sequencing_group_id': sg_id,
+                    'cpg_cohort_id': 'COH1',
+                }
+            )
 
 
 @pytest.fixture
@@ -72,17 +85,17 @@ def test_query_genotyping_manifests(mock_config, mock_query):
                     'type': 'manifest',
                     'outputs': {
                         'path': 'gs://cpg-ourdna-main/manifests/production_manifests/COH8495_production_manifest.csv',
-                        'basename': 'COH8495_production_manifest.csv'
-                    }
+                        'basename': 'COH8495_production_manifest.csv',
+                    },
                 },
                 {
                     'id': '231239',
                     'type': 'manifest',
                     'outputs': {
                         'path': 'gs://cpg-ourdna-main/gtc_genotyping_array/manifests/genotyping_array_manifest_cohort_COH10152.csv',
-                        'basename': 'genotyping_array_manifest_cohort_COH10152.csv'
-                    }
-                }
+                        'basename': 'genotyping_array_manifest_cohort_COH10152.csv',
+                    },
+                },
             ]
         }
     }
@@ -157,7 +170,7 @@ def test_parse_genotyping_manifest(mock_to_path, synthetic_manifest):
     assert mapping == {
         'CPGSYN001': 'gs://cpg-test-main/gtc/CPGSYN001.gtc',
         'CPGSYN002': 'gs://cpg-test-main/gtc/CPGSYN002.gtc',
-        'CPGSYN003': 'gs://cpg-test-main/gtc/CPGSYN003.gtc'
+        'CPGSYN003': 'gs://cpg-test-main/gtc/CPGSYN003.gtc',
     }
 
 
@@ -177,12 +190,7 @@ def test_query_previous_aggregate(mock_query):
         'analyses': [
             {
                 'outputs': {'pgen': 'gs://path/merged.pgen'},
-                'project': {
-                    'sequencingGroups': [
-                        {'id': 'CPG001'},
-                        {'id': 'CPG002'}
-                    ]
-                }
+                'project': {'sequencingGroups': [{'id': 'CPG001'}, {'id': 'CPG002'}]},
             }
         ]
     }

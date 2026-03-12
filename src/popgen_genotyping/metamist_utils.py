@@ -6,13 +6,14 @@ import csv
 import functools
 from typing import TYPE_CHECKING, Any
 
-from metamist.graphql import gql, query
 from cpg_utils import to_path
 from cpg_utils.config import config_retrieve
+from metamist.graphql import gql, query
+
 from popgen_genotyping.utils import get_sequencing_group_cohort
 
 if TYPE_CHECKING:
-    from cpg_flow.targets import SequencingGroup
+    from cpg_flow.targets import Cohort, SequencingGroup
 
 # GQL to retrieve reported sex for active sequencing groups
 QUERY_REPORTED_SEX = gql(
@@ -140,12 +141,9 @@ def parse_genotyping_manifest_for_reheader(manifest_path: str) -> dict[str, dict
             gtc_path: str | None = row.get('cpg_gcp_filepath')
             barcode: str | None = row.get('sentrix_barcode_a')
             pos: str | None = row.get('sentrix_position_a')
-            
+
             if sg_id and gtc_path and barcode and pos:
-                mapping[sg_id] = {
-                    'gtc': gtc_path,
-                    'old_name': f'{barcode}_{pos}'
-                }
+                mapping[sg_id] = {'gtc': gtc_path, 'old_name': f'{barcode}_{pos}'}
 
     return mapping
 
@@ -159,14 +157,15 @@ def resolve_cohort_gtc_mapping(cohort: 'Cohort') -> dict[str, dict[str, str]]:
 
     Returns:
         dict[str, dict[str, str]]: Mapping of SG ID to {'gtc': path, 'old_name': barcode_pos}
+
+    Raises:
+        ValueError: If no manifest is found for the cohort.
     """
     # 1. Query manifests for the project
     all_manifests: list[dict[str, Any]] = query_genotyping_manifests(cohort.analysis_dataset.name)
 
     # 2. Find manifest with the cohort ID in its basename
-    matching_manifests: list[dict[str, Any]] = [
-        m for m in all_manifests if cohort.id in str(m.get('basename', ''))
-    ]
+    matching_manifests: list[dict[str, Any]] = [m for m in all_manifests if cohort.id in str(m.get('basename', ''))]
 
     if not matching_manifests:
         raise ValueError(f'No manifest found for cohort {cohort.id}')
@@ -176,9 +175,9 @@ def resolve_cohort_gtc_mapping(cohort: 'Cohort') -> dict[str, dict[str, str]]:
 
     # 3. Parse manifest
     mapping: dict[str, dict[str, str]] = parse_genotyping_manifest_for_reheader(manifest_path)
-    
+
     # 4. Filter to only include SGs active in this cohort
-    cohort_sg_ids = set(cohort.get_sequencing_group_ids())
+    cohort_sg_ids: set[str] = set(cohort.get_sequencing_group_ids())
     return {sg_id: data for sg_id, data in mapping.items() if sg_id in cohort_sg_ids}
 
 
@@ -199,13 +198,11 @@ def resolve_gtc_path(sequencing_group: 'SequencingGroup') -> str:
     all_manifests: list[dict[str, Any]] = query_genotyping_manifests(sequencing_group.dataset.name)
 
     # 2. Resolve the cohort for this sequencing group
-    cohort = get_sequencing_group_cohort(sequencing_group)
+    cohort: Cohort = get_sequencing_group_cohort(sequencing_group)
     cohort_id: str = cohort.id  # Expected format: COH[0-9]+
 
     # 3. Find manifest with the cohort ID in its basename
-    matching_manifests: list[dict[str, Any]] = [
-        m for m in all_manifests if cohort_id in str(m.get('basename', ''))
-    ]
+    matching_manifests: list[dict[str, Any]] = [m for m in all_manifests if cohort_id in str(m.get('basename', ''))]
 
     if not matching_manifests:
         available_basenames: list[str] = [str(m.get('basename', 'unknown')) for m in all_manifests]
@@ -220,9 +217,7 @@ def resolve_gtc_path(sequencing_group: 'SequencingGroup') -> str:
     manifest_path: str | None = latest_manifest.get('path')
 
     if not manifest_path:
-        raise ValueError(
-            f'Manifest for cohort {cohort_id} (ID: {latest_manifest.get("id")}) has no path output'
-        )
+        raise ValueError(f'Manifest for cohort {cohort_id} (ID: {latest_manifest.get("id")}) has no path output')
 
     # 4. Parse the chosen manifest and retrieve the path
     mapping: dict[str, str] = parse_genotyping_manifest(manifest_path)

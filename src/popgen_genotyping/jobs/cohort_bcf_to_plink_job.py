@@ -53,16 +53,16 @@ def run_cohort_bcf_to_plink(
     )
 
     # 3. Handle sex metadata if provided
-    update_sex_cmd = ""
+    update_sex_cmd = ''
     if sex_mapping:
         sex_tsv_lines = []
         for sg_id, sex_code in sex_mapping.items():
             # PLINK format: FamilyID(0) SampleID Sex
             sex_tsv_lines.append(f'0\t{sg_id}\t{sex_code}')
-        
+
         sex_tsv_content = '\\n'.join(sex_tsv_lines)
         j.command(f'echo -e "{sex_tsv_content}" > sex_metadata.tsv')
-        update_sex_cmd = "--update-sex sex_metadata.tsv"
+        update_sex_cmd = '--update-sex sex_metadata.tsv'
 
     # 4. Direct conversion using PLINK2
     j.command(

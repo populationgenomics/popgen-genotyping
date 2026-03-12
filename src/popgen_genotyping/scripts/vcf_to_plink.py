@@ -52,14 +52,14 @@ def convert_bcf_to_plink19(sg_id: str, local_bcf: str, output_dir: str, sex_tsv:
     # Use PLINK2 for initial conversion to leverage --max-alleles 2
     # This filters out multiallelic variants before they hit the PLINK 1.9 merge
     command: str = (
-        f"plink2 --bcf {local_bcf} "
-        f"--max-alleles 2 "
-        f"--split-par hg38 "
+        f'plink2 --bcf {local_bcf} '
+        f'--max-alleles 2 '
+        f'--split-par hg38 '
         f"--set-all-var-ids '@:#:$r:$a' "
-        f"--allow-extra-chr "
-        f"--make-bed "
-        f"--memory 2000 "
-        f"--out {out_prefix}"
+        f'--allow-extra-chr '
+        f'--make-bed '
+        f'--memory 2000 '
+        f'--out {out_prefix}'
     )
 
     # Add sex update if provided

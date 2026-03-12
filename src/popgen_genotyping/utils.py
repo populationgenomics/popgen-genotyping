@@ -6,17 +6,18 @@ import csv
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from hailtop.batch.job import BashJob
-from cpg_utils import to_path, Path as CPGPath
-from cpg_utils.config import config_retrieve
-from cpg_flow.workflow import get_workflow
 from cpg_flow.inputs import get_multicohort
+from cpg_flow.workflow import get_workflow
+from cpg_utils import Path as CPGPath
+from cpg_utils import to_path
+from cpg_utils.config import config_retrieve
+from hailtop.batch.job import BashJob
 
 if TYPE_CHECKING:
+    from cpg_flow.targets import Cohort, Dataset, SequencingGroup
     from hailtop.batch import Batch
-    from cpg_flow.targets import Dataset, SequencingGroup, Cohort
 
-FAM_COLUMN_COUNT = 6
+FAM_COLUMN_COUNT: int = 6
 
 
 def get_output_prefix(dataset: 'Dataset', stage_name: str, tmp: bool = False) -> 'CPGPath':
@@ -131,4 +132,3 @@ def register_job(
     j.storage(config_retrieve([*config_path, 'storage'], default_storage))
 
     return j
-

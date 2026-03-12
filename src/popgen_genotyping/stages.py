@@ -55,7 +55,7 @@ class GtcToBcfs(CohortStage):
 
         # Resolve GTC mapping (SG_ID -> {gtc, old_name})
         mapping_data = resolve_cohort_gtc_mapping(cohort)
-        
+
         gtc_paths = [d['gtc'] for d in mapping_data.values()]
         # sample_mapping: barcode_pos -> SG_ID
         sample_mapping = {d['old_name']: sg_id for sg_id, d in mapping_data.items()}
@@ -98,7 +98,7 @@ class BafRegress(CohortStage):
 
         # Pull the cohort heavy BCF output from the previous stage
         heavy_bcf_path = inputs.as_path(cohort, GtcToBcfs, 'heavy_bcf')
-        
+
         # Population AF reference mandatory for BAFRegress
         af_ref_path = config_retrieve(['popgen_genotyping', 'references', 'af_ref_path'])
 

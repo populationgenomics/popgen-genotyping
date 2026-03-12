@@ -50,7 +50,7 @@ def run_merge_plink(
         prev_resource = b.read_input_group(
             bed=previous_aggregate_paths['bed'],
             bim=previous_aggregate_paths['bim'],
-            fam=previous_aggregate_paths['fam']
+            fam=previous_aggregate_paths['fam'],
         )
 
         if samples_to_remove:
@@ -81,11 +81,7 @@ def run_merge_plink(
 
     # 2. Stage all new input datasets
     for _i, paths in enumerate(cohort_plink_paths):
-        resource = b.read_input_group(
-            bed=paths['bed'],
-            bim=paths['bim'],
-            fam=paths['fam']
-        )
+        resource = b.read_input_group(bed=paths['bed'], bim=paths['bim'], fam=paths['fam'])
         staged_prefixes.append(str(resource))
 
     # 3. Define output resource group

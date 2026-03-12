@@ -40,9 +40,7 @@ def run_export_cohort_datasets(
 
     # 1. Stage inputs
     plink_input = b.read_input_group(
-        bed=input_plink_prefix['bed'],
-        bim=input_plink_prefix['bim'],
-        fam=input_plink_prefix['fam']
+        bed=input_plink_prefix['bed'], bim=input_plink_prefix['bim'], fam=input_plink_prefix['fam']
     )
 
     # 2. Define output resource group

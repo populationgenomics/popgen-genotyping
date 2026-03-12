@@ -2,12 +2,10 @@
 Job logic for estimating sample contamination using BAFRegress.
 """
 
-
 from hailtop.batch.job import BashJob
 from cpg_utils.config import config_retrieve
 from cpg_utils.hail_batch import get_batch
 from popgen_genotyping.utils import register_job
-
 
 
 def run_bafregress(

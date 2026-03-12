@@ -1,0 +1,3 @@
+"""
+Popgen Genotyping package.
+"""
