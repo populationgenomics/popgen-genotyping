@@ -2,6 +2,8 @@
 Plink2 outputs from pgen/pvar
 """
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING
 
 from cpg_utils.config import config_retrieve
@@ -10,14 +12,15 @@ from cpg_utils.hail_batch import get_batch
 from popgen_genotyping.utils import register_job
 
 if TYPE_CHECKING:
-    from hailtop.batch.job import Job
+    from hailtop.batch import Batch
+    from hailtop.batch.job import BashJob
 
 
 def run_plink2_qc(
     pgen_path: str,
     outputs_path: str,
     job_name: str = 'plink2_qc',
-) -> 'Job':
+) -> BashJob:
     """
     Generate plink2 QC outputs from pgen/pvar files.
 
@@ -28,21 +31,18 @@ def run_plink2_qc(
 
     Returns:
         BashJob: The queued Hail Batch job.
-
     """
-    b = get_batch()
-    j = register_job(
+    b: Batch = get_batch()
+    j: BashJob = register_job(
         batch=b,
         job_name=job_name,
         config_path=['popgen_genotyping', 'plink_qc'],
-        image=config_retrieve(['workflow', 'plink_image']),  # TODO confirm whether plink image has plink2
+        image=config_retrieve(['workflow', 'plink_image']),
         default_cpu=2,
         default_storage='50G',
     )
 
-    # Read inputs into local env. Plink2 requires 3 files in the same location,
-    # and the command requires the path prefix to the files (ie. without the
-    # file extension).
+    # Read inputs into local env. Plink2 requires 3 files in the same location
     pvar_path = pgen_path.replace('.pgen', '.pvar')
     psam_path = pgen_path.replace('.pgen', '.psam')
 
@@ -52,8 +52,6 @@ def run_plink2_qc(
         pvar=pvar_path,
         psam=psam_path,
     )
-
-    pgen_prefix = pgen_files.pgen.removesuffix('.pgen')
 
     # Define output files
     j.declare_resource_group(
@@ -68,19 +66,20 @@ def run_plink2_qc(
         },
     )
 
+    check_sex_args: str = (
+        'max-female-xf=0.25 min-male-xf=0.75 max-female-ycount=100 '
+        "min-male-ycount=1000 cols='status,pedsex,xf,ycount,yrate'"
+    )
+
     j.command(
         f"""
         set -ex
-        plink2 --pfile {pgen_prefix} \\
+        plink2 --pfile {pgen_files} \\
             --missing \\
             --freq \\
             --hardy \\
             --het \\
-            --check-sex max-female-xf=0.25 \
-                min-male-xf=0.75 \
-                max-female-ycount=100 \
-                min-male-ycount=1000 \
-                cols='status,pedsex,xf,ycount,yrate' \\
+            --check-sex {check_sex_args} \\
             --make-king-table \\
             --out {j.plink_qc_outputs.root}
         """

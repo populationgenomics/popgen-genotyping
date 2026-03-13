@@ -269,7 +269,7 @@ class ExportCohortDatasets(MultiCohortStage):
 @stage(required_stages=[ExportCohortDatasets])
 class Plink2Qc(MultiCohortStage):
     """
-    Run PLINK2 QC on a cohort object's pgen/pvar/psam files..
+    Run PLINK2 QC on a cohort object's pgen/pvar/psam files.
     """
 
     def expected_outputs(self, multicohort: MultiCohort) -> dict[str, Path]:
@@ -298,14 +298,11 @@ class Plink2Qc(MultiCohortStage):
         input_plink_pgen: Path = inputs.as_path(target=multicohort, stage=ExportCohortDatasets, key='pgen')
 
         # The outputs_path for the run_plink2_qc job is the base prefix for all QC files.
-        # It combines the stage's output directory with the base filename 'cohort'.
-        output_plink2_prefix = str(
-            get_output_prefix(dataset=multicohort.analysis_dataset, stage_name=self.name) / 'cohort'
-        )
+        output_plink2_prefix = str(object=outputs['smiss']).removesuffix('.smiss')
 
         # Call the Hail Batch job function
         j = run_plink2_qc(
-            pgen_path=str(input_plink_pgen),
+            pgen_path=str(object=input_plink_pgen),
             outputs_path=output_plink2_prefix,
             job_name=f'Plink2Qc_{multicohort.name}',
         )
