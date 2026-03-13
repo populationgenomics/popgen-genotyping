@@ -292,7 +292,7 @@ class Plink2Qc(MultiCohortStage):
         """
         Queue the PLINK2 QC job for the multi-cohort.
         """
-        outputs: dict[str, Path] = self.expected_outputs(multicohort)
+        outputs: dict[str, Path] = self.expected_outputs(multicohort=multicohort)
 
         # Get the input PGEN file path from the ExportCohortDatasets stage
         input_plink_pgen: Path = inputs.as_path(target=multicohort, stage=ExportCohortDatasets, key='pgen')
@@ -301,7 +301,7 @@ class Plink2Qc(MultiCohortStage):
         output_plink2_prefix = str(object=outputs['smiss']).removesuffix('.smiss')
 
         # Call the Hail Batch job function
-        j = run_plink2_qc(
+        j: BashJob = run_plink2_qc(
             pgen_path=str(object=input_plink_pgen),
             outputs_path=output_plink2_prefix,
             job_name=f'Plink2Qc_{multicohort.name}',

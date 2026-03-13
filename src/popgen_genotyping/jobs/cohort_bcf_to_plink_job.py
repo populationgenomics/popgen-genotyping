@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from cpg_utils.config import config_retrieve
 from cpg_utils.hail_batch import get_batch
+
 from popgen_genotyping.utils import register_job
 
 if TYPE_CHECKING:
@@ -55,7 +56,7 @@ def run_cohort_bcf_to_plink(
     # 3. Handle sex metadata if provided
     update_sex_cmd = ''
     if sex_mapping:
-        sex_tsv_lines = []
+        sex_tsv_lines: list[str] = []
         for sg_id, sex_code in sex_mapping.items():
             # PLINK format: FamilyID(0) SampleID Sex
             sex_tsv_lines.append(f'0\t{sg_id}\t{sex_code}')
