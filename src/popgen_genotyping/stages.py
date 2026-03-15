@@ -103,8 +103,8 @@ class BafRegress(CohortStage):
         # Pull the cohort heavy BCF output from the previous stage
         heavy_bcf_path: Path = inputs.as_path(cohort, GtcToBcfs, 'heavy_bcf')
 
-        # Population AF reference mandatory for BAFRegress
-        af_ref_path: str = config_retrieve(['popgen_genotyping', 'references', 'af_ref_path'])
+        # Population AF reference optional for BAFRegress
+        af_ref_path: str | None = config_retrieve(['popgen_genotyping', 'references', 'af_ref_path'], default=None)
 
         j: BashJob = run_bafregress(
             bcf_path=str(object=heavy_bcf_path),

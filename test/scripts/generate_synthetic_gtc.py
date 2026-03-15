@@ -72,11 +72,11 @@ def generate_gtc(  # noqa: PLR0915
     print(f'Generating GTC: {sample_name} | Contamination: {contamination * 100}% | Seed: {sample_seed}')
 
     # 1. Simulate population AFs (Consistent across cohort)
-    af_rng: random.Random = random.Random(AF_SEED)
+    af_rng: random.Random = random.Random(AF_SEED)  # noqa: S311
     pop_afs: list[float] = [af_rng.betavariate(0.5, 0.5) for _ in range(num_snps)]
 
     # 2. Simulate sample genotypes (Unique per sample)
-    sample_rng: random.Random = random.Random(sample_seed)
+    sample_rng: random.Random = random.Random(sample_seed)  # noqa: S311
 
     # Genotypes: 1=AA, 2=AB, 3=BB, 0=NC
     gts: list[int] = []
