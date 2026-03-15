@@ -6,11 +6,12 @@ graph TD
     end
 
     %% DAG Structure
-    GTC[Raw GTC Files]:::data --> GtoB[GtcToBcfs]:::cohort
-    GtoB --> BAF[BafRegress]:::cohort
-    GtoB --> BtoP[CohortBcfToPlink]:::cohort
-    BtoP --> MCP[MergeCohortPlink]:::multicohort
-    MCP --> ECD[ExportCohortDatasets]:::multicohort
+    GTC[Raw GTC Files]:::data --> GtoB[GtcToBcfs<br/><i>GTC to Heavy/Light BCF</i>]:::cohort
+    GtoB --> BAF[BafRegress<br/><i>Contamination Estimation</i>]:::cohort
+    GtoB --> BtoP[CohortBcfToPlink<br/><i>BCF to PLINK 1.9</i>]:::cohort
+    BtoP --> MCP[MergeCohortPlink<br/><i>Merge Samples + Rolling Aggregate</i>]:::multicohort
+    MCP --> ECD[ExportCohortDatasets<br/><i>Export to PLINK2/BCF</i>]:::multicohort
+    ECD --> QC[Plink2Qc<br/><i>PLINK2 QC Suite</i>]:::multicohort
 
     %% Component styling
     classDef cohort fill:#d1ecf1,stroke:#007bff,stroke-width:2px;
@@ -19,4 +20,4 @@ graph TD
 
     %% Explicit classes
     class GtoB,BAF,BtoP cohort;
-    class MCP,ECD multicohort;
+    class MCP,ECD,QC multicohort;
