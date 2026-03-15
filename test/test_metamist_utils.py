@@ -9,6 +9,7 @@ from popgen_genotyping.metamist_utils import (
     parse_genotyping_manifest,
     query_previous_aggregate,
     resolve_gtc_path,
+    resolve_rolling_aggregate,
 )
 
 
@@ -200,3 +201,54 @@ def test_query_previous_aggregate(mock_query):
     assert outputs == {'pgen': 'gs://path/merged.pgen'}
     assert active_sgs == ['CPG001', 'CPG002']
     mock_query.assert_called_once()
+
+
+@patch('popgen_genotyping.metamist_utils.query')
+def test_query_previous_aggregate_active_only(mock_query):
+    """
+    Test that query_previous_aggregate returns only active samples.
+    """
+    # Mocking a response where one sample (CPG003) is inactive and thus excluded from the response
+    mock_query.return_value = {
+        'analyses': [
+            {
+                'outputs': {'bed': 'gs://path/merged.bed', 'bim': 'gs://path/merged.bim', 'fam': 'gs://path/merged.fam'},
+                'project': {
+                    'sequencingGroups': [{'id': 'CPG001'}, {'id': 'CPG002'}]
+                    # CPG003 is missing because it's inactive
+                },
+            }
+        ]
+    }
+
+    _outputs, active_sgs = query_previous_aggregate(123)
+
+    expected_count = 2
+    assert len(active_sgs) == expected_count
+    assert 'CPG001' in active_sgs
+    assert 'CPG002' in active_sgs
+    assert 'CPG003' not in active_sgs
+
+
+@patch('popgen_genotyping.metamist_utils.query_previous_aggregate')
+@patch('popgen_genotyping.utils.parse_psam')
+def test_resolve_rolling_aggregate_with_removed_sample(mock_parse_psam, mock_query_prev):
+    """
+    Test that resolve_rolling_aggregate correctly identifies samples to remove.
+    """
+    # Mock previous aggregate outputs and current active samples
+    # Current active samples: CPG001 and CPG002
+    mock_query_prev.return_value = (
+        {'bed': 'gs://path/merged.bed', 'bim': 'gs://path/merged.bim', 'fam': 'gs://path/merged.fam'},
+        ['CPG001', 'CPG002'],
+    )
+
+    # Mock previous aggregate FAM file content: CPG001, CPG002, and CPG003
+    mock_parse_psam.return_value = ['CPG001', 'CPG002', 'CPG003']
+
+    # Execute
+    paths, to_remove = resolve_rolling_aggregate(123)
+
+    # Verify
+    assert paths == {'bed': 'gs://path/merged.bed', 'bim': 'gs://path/merged.bim', 'fam': 'gs://path/merged.fam'}
+    assert to_remove == ['CPG003']
