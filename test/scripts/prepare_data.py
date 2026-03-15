@@ -15,32 +15,38 @@ from scripts.test_utils import (
 )
 
 
-def generate_gtcs(samples: list[str], num_snps: int) -> list[str]:
+def generate_gtcs(samples: list[str], num_snps: int, base_seed: int = 42) -> list[str]:
     """
     Generate synthetic GTC files for a list of samples.
 
     Args:
         samples (list[str]): List of sample names.
         num_snps (int): Number of SNPs per GTC.
+        base_seed (int): Base random seed. Each sample i gets base_seed + i.
 
     Returns:
         list[str]: Internal container paths to the generated GTCs.
     """
-    print(f'>>> Generating synthetic GTC files ({len(samples)} samples)...')
+    print(f'>>> Generating synthetic GTC files ({len(samples)} samples, base seed: {base_seed})...')
     gtc_paths: list[str] = []
-    for sample in samples:
+    for i, sample in enumerate(samples):
         gtc_path: Path = DATA_DIR / f'{sample}.gtc'
-        if not gtc_path.exists():
-            cmd: list[str] = [
-                'python3',
-                'test/scripts/generate_synthetic_gtc.py',
-                str(gtc_path),
-                '--num',
-                str(num_snps),
-                '--contam',
-                '0.05',
-            ]
-            subprocess.run(cmd, check=True, capture_output=True)  # noqa: S603
+        # Always re-generate if we want to ensure unique seeds for this run
+        if gtc_path.exists():
+            os.remove(gtc_path)
+
+        cmd: list[str] = [
+            'python3',
+            'test/scripts/generate_synthetic_gtc.py',
+            str(gtc_path),
+            '--num',
+            str(num_snps),
+            '--seed',
+            str(base_seed + i),
+            '--contam',
+            '0.05',
+        ]
+        subprocess.run(cmd, check=True, capture_output=True)  # noqa: S603
         gtc_paths.append(to_container(gtc_path))
     return gtc_paths
 

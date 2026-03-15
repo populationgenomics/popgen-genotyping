@@ -14,6 +14,7 @@ DEFAULT_SNP_COUNT: int = 1000
 DEFAULT_CONTAMINATION: float = 0.05
 OUTLIER_PERCENTAGE: float = 0.02
 DEFAULT_SEED: int = 42
+AF_SEED: int = 1337  # Fixed seed for population AFs to be consistent across a cohort
 
 # Official Illumina Tags
 TAG_NUM_SNPS: int = 1
@@ -25,7 +26,7 @@ TAG_GENOTYPES: int = 1002
 TAG_BASE_CALLS: int = 1003
 TAG_GENCALL_SCORES: int = 1004
 TAG_B_ALLELE_FREQS: int = 1012
-TAG_LOGR_RATIOS: int = 1013
+TAG_NUM_SNPS_INT: int = 1013
 
 
 def leb128_encode(n: int) -> bytes:
@@ -53,7 +54,7 @@ def generate_gtc(  # noqa: PLR0915
     num_snps: int,
     sample_name: str,
     contamination: float = DEFAULT_CONTAMINATION,
-    seed: int = DEFAULT_SEED,
+    sample_seed: int = DEFAULT_SEED,
 ) -> list[float]:
     """
     Generate a realistic deterministic synthetic GTC for a given number of loci.
@@ -63,61 +64,65 @@ def generate_gtc(  # noqa: PLR0915
         num_snps (int): Number of SNPs to generate.
         sample_name (str): Name of the sample to embed in the GTC.
         contamination (float): Simulated contamination level. Defaults to 0.05.
-        seed (int): Random seed for determinism. Defaults to 42.
+        sample_seed (int): Random seed for sample-specific genotypes. Defaults to 42.
 
     Returns:
         list[float]: The generated population allele frequencies for the sites.
     """
-    print(f'Generating GTC: {sample_name} | Contamination: {contamination * 100}% | Seed: {seed}')
-    rng: random.Random = random.Random(seed)  # noqa: S311
+    print(f'Generating GTC: {sample_name} | Contamination: {contamination * 100}% | Seed: {sample_seed}')
 
-    # 1. Simulate population AFs and genotypes
-    pop_afs: list[float] = []
-    for _ in range(num_snps):
-        pop_afs.append(rng.betavariate(0.5, 0.5))
+    # 1. Simulate population AFs (Consistent across cohort)
+    af_rng: random.Random = random.Random(AF_SEED)
+    pop_afs: list[float] = [af_rng.betavariate(0.5, 0.5) for _ in range(num_snps)]
+
+    # 2. Simulate sample genotypes (Unique per sample)
+    sample_rng: random.Random = random.Random(sample_seed)
 
     # Genotypes: 1=AA, 2=AB, 3=BB, 0=NC
     gts: list[int] = []
     for af in pop_afs:
         p_aa: float = (1 - af) ** 2
         p_ab: float = 2 * af * (1 - af)
-        gts.append(rng.choices([1, 2, 3], weights=[p_aa, p_ab, af**2], k=1)[0])
+        p_bb: float = af**2
+        gts.append(sample_rng.choices([1, 2, 3], weights=[p_aa, p_ab, p_bb], k=1)[0])
 
-    # 2. BAF and LRR simulation
+    # 3. BAF and LRR simulation
     baf_list: list[float] = []
     sigma: float = 0.03
-    drift: float = rng.gauss(0, 0.01)
+    drift: float = sample_rng.gauss(0, 0.01)
 
     for i, gt in enumerate(gts):
         af: float = pop_afs[i]
         if gt == 1:  # AA
             mu = (contamination * af) + drift
-            baf_val = rng.gauss(mu, sigma)
+            baf_val = sample_rng.gauss(mu, sigma)
         elif gt == 3:  # BB  # noqa: PLR2004
             mu = 1.0 - (contamination * (1.0 - af)) + drift
-            baf_val = rng.gauss(mu, sigma)
+            baf_val = sample_rng.gauss(mu, sigma)
         else:  # AB
-            baf_val = rng.gauss(0.5, 0.025)
+            baf_val = sample_rng.gauss(0.5, 0.025)
 
-        if rng.random() < OUTLIER_PERCENTAGE:
-            baf_val = rng.uniform(0, 1)
+        if sample_rng.random() < OUTLIER_PERCENTAGE:
+            baf_val = sample_rng.uniform(0, 1)
         baf_list.append(max(0.0, min(1.0, baf_val)))
 
-    # 3. Pack data blocks
+    # 4. Pack data blocks
     def make_array_block(data: bytes) -> bytes:
         return struct.pack('<i', num_snps) + data
 
     genotypes_data: bytes = make_array_block(bytes(gts))
     baf_data: bytes = make_array_block(struct.pack(f'<{num_snps}f', *baf_list))
-    lrr_data: bytes = make_array_block(struct.pack(f'<{num_snps}f', *([rng.gauss(0, 0.05) for _ in range(num_snps)])))
+    lrr_data: bytes = make_array_block(
+        struct.pack(f'<{num_snps}f', *([sample_rng.gauss(0, 0.05) for _ in range(num_snps)]))
+    )
     scores_data: bytes = make_array_block(
-        struct.pack(f'<{num_snps}f', *([0.98 + rng.random() * 0.02 for _ in range(num_snps)]))
+        struct.pack(f'<{num_snps}f', *([0.98 + sample_rng.random() * 0.02 for _ in range(num_snps)]))
     )
     raw_x_data: bytes = make_array_block(
-        struct.pack(f'<{num_snps}H', *([1000 + int(rng.gauss(0, 100)) for _ in range(num_snps)]))
+        struct.pack(f'<{num_snps}H', *([1000 + int(sample_rng.gauss(0, 100)) for _ in range(num_snps)]))
     )
     raw_y_data: bytes = make_array_block(
-        struct.pack(f'<{num_snps}H', *([1000 + int(rng.gauss(0, 100)) for _ in range(num_snps)]))
+        struct.pack(f'<{num_snps}H', *([1000 + int(sample_rng.gauss(0, 100)) for _ in range(num_snps)]))
     )
 
     # Base Calls (Dummy placeholders)
@@ -131,7 +136,7 @@ def generate_gtc(  # noqa: PLR0915
             base_calls_list.append(b'BB')
     base_calls_data: bytes = make_array_block(b''.join(base_calls_list))
 
-    # 4. Normalization and Metadata
+    # 5. Normalization and Metadata
     xforms_data: bytes = struct.pack('<i', 1) + struct.pack('<i', 1) + struct.pack('<12f', *([0.0] * 12))
     name_bytes: bytes = sample_name.encode('ascii')
     sample_name_data: bytes = leb128_encode(len(name_bytes)) + name_bytes
@@ -146,10 +151,10 @@ def generate_gtc(  # noqa: PLR0915
         (TAG_BASE_CALLS, base_calls_data),
         (TAG_GENCALL_SCORES, scores_data),
         (TAG_B_ALLELE_FREQS, baf_data),
-        (TAG_LOGR_RATIOS, lrr_data),
+        (TAG_NUM_SNPS_INT, lrr_data),
     ]
 
-    # 5. Write file
+    # 6. Write file
     current_offset: int = 8 + (len(tags) * 6)
     toc: list[bytes] = []
     blocks: list[bytes] = []
@@ -198,7 +203,13 @@ def main() -> None:
     parser.add_argument('--af-out', type=str, default='pop_ref.vcf', help='Output AF reference path')
 
     args: argparse.Namespace = parser.parse_args()
-    pop_afs: list[float] = generate_gtc(args.output, args.num, Path(args.output).stem, contamination=args.contam)
+    pop_afs: list[float] = generate_gtc(
+        args.output,
+        args.num,
+        Path(args.output).stem,
+        contamination=args.contam,
+        sample_seed=args.seed,
+    )
 
     write_af_vcf(args.af_out, pop_afs)
     print(f'Generated sidecar AF reference: {args.af_out}')
