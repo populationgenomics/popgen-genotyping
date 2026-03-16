@@ -2,11 +2,13 @@
 Tests for metamist_utils.py.
 """
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
 import pytest
+
 from popgen_genotyping.metamist_utils import (
-    query_genotyping_manifests,
     parse_genotyping_manifest,
+    query_genotyping_manifests,
     query_previous_aggregate,
     resolve_gtc_path,
     resolve_rolling_aggregate,
@@ -212,7 +214,11 @@ def test_query_previous_aggregate_active_only(mock_query):
     mock_query.return_value = {
         'analyses': [
             {
-                'outputs': {'bed': 'gs://path/merged.bed', 'bim': 'gs://path/merged.bim', 'fam': 'gs://path/merged.fam'},
+                'outputs': {
+                    'bed': 'gs://path/merged.bed',
+                    'bim': 'gs://path/merged.bim',
+                    'fam': 'gs://path/merged.fam',
+                },
                 'project': {
                     'sequencingGroups': [{'id': 'CPG001'}, {'id': 'CPG002'}]
                     # CPG003 is missing because it's inactive
@@ -239,7 +245,7 @@ def test_resolve_rolling_aggregate_with_removed_sample(mock_parse_psam, mock_que
     # Mock previous aggregate outputs and current active samples
     # Current active samples: CPG001 and CPG002
     mock_query_prev.return_value = (
-        {'bed': 'gs://path/merged.bed', 'bim': 'gs://path/merged.bim', 'fam': 'gs://path/merged.fam'},
+        {'pgen': 'gs://path/merged.pgen', 'pvar': 'gs://path/merged.pvar', 'psam': 'gs://path/merged.psam'},
         ['CPG001', 'CPG002'],
     )
 
@@ -250,5 +256,5 @@ def test_resolve_rolling_aggregate_with_removed_sample(mock_parse_psam, mock_que
     paths, to_remove = resolve_rolling_aggregate(123)
 
     # Verify
-    assert paths == {'bed': 'gs://path/merged.bed', 'bim': 'gs://path/merged.bim', 'fam': 'gs://path/merged.fam'}
+    assert paths == {'pgen': 'gs://path/merged.pgen', 'pvar': 'gs://path/merged.pvar', 'psam': 'gs://path/merged.psam'}
     assert to_remove == ['CPG003']
