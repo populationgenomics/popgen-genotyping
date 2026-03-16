@@ -4,7 +4,7 @@ Stage: GtcToBcfs reproduction.
 
 from pathlib import Path
 
-from scripts.test_utils import (
+from scripts.testing_utils import (
     BCFTOOLS_IMAGE,
     BPM_HOST,
     DATA_DIR,

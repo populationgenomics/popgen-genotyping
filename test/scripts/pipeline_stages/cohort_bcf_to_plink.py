@@ -4,7 +4,7 @@ Stage: CohortBcfToPlink reproduction.
 
 from pathlib import Path
 
-from scripts.test_utils import (
+from scripts.testing_utils import (
     DATA_DIR,
     PLINK_IMAGE,
     run_docker,

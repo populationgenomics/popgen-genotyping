@@ -12,7 +12,7 @@ from scripts.pipeline_stages.cohort_bcf_to_plink import run_cohort_bcf_to_plink
 from scripts.pipeline_stages.export_cohort_datasets import run_export_cohort_datasets
 from scripts.pipeline_stages.gtc_to_bcfs import run_gtc_to_bcfs
 from scripts.prepare_data import generate_gtcs, prepare_af_reference
-from scripts.test_utils import DATA_DIR
+from scripts.testing_utils import DATA_DIR
 
 
 def main() -> None:

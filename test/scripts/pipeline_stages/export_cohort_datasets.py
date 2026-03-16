@@ -4,7 +4,7 @@ Stage: ExportCohortDatasets reproduction.
 
 from pathlib import Path
 
-from scripts.test_utils import (
+from scripts.testing_utils import (
     BCFTOOLS_IMAGE,
     DATA_DIR,
     PLINK_IMAGE,

@@ -6,7 +6,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from scripts.test_utils import (
+from scripts.testing_utils import (
     BCFTOOLS_IMAGE,
     DATA_DIR,
     SITES_FILE,
@@ -79,8 +79,7 @@ def prepare_af_reference(num_snps: int) -> str:
         af_vcf_int: str = to_container(af_vcf)
         af_vcf_gz_int: str = to_container(af_vcf_gz)
         index_cmd: str = (
-            f"bash -c 'bcftools view {af_vcf_int} -O z -o {af_vcf_gz_int} && "
-            f"bcftools index {af_vcf_gz_int}'"
+            f"bash -c 'bcftools view {af_vcf_int} -O z -o {af_vcf_gz_int} && bcftools index {af_vcf_gz_int}'"
         )
         run_docker(BCFTOOLS_IMAGE, index_cmd)
         if af_vcf.exists():

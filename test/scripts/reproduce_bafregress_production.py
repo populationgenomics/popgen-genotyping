@@ -10,7 +10,7 @@ import os
 from scripts.pipeline_stages.bafregress import run_bafregress
 from scripts.pipeline_stages.gtc_to_bcfs import run_gtc_to_bcfs
 from scripts.prepare_data import generate_gtcs
-from scripts.test_utils import DATA_DIR
+from scripts.testing_utils import DATA_DIR
 
 
 def main() -> None:
