@@ -3,6 +3,7 @@ graph TD
         direction LR
         L1[Cohort Stage]:::cohort
         L2[Multi-Cohort Stage]:::multicohort
+        L3[Conditional Job]:::conditional
     end
 
     %% DAG Structure
@@ -10,14 +11,17 @@ graph TD
     GtoB --> BAF[BafRegress<br/><i>Contamination Estimation</i>]:::cohort
     GtoB --> BtoP[CohortBcfToPlink<br/><i>BCF to PLINK 1.9</i>]:::cohort
     BtoP --> MCP[MergeCohortPlink<br/><i>Merge Samples + Rolling Aggregate</i>]:::multicohort
+    P2P1[Plink2ToPlink1<br/><i>PLINK2 to PLINK1.9 if needed</i>]:::conditional --> MCP
     MCP --> ECD[ExportCohortDatasets<br/><i>Export to PLINK2/BCF</i>]:::multicohort
     ECD --> QC[Plink2Qc<br/><i>PLINK2 QC Suite</i>]:::multicohort
 
     %% Component styling
     classDef cohort fill:#d1ecf1,stroke:#007bff,stroke-width:2px;
     classDef multicohort fill:#f3e5f5,stroke:#6f42c1,stroke-width:2px;
+    classDef conditional fill:#fff3cd,stroke:#ffc107,stroke-width:2px;
     classDef data fill:#fff,stroke:#333,stroke-dasharray: 5 5;
 
     %% Explicit classes
     class GtoB,BAF,BtoP cohort;
     class MCP,ECD,QC multicohort;
+    class P2P1 conditional;

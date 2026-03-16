@@ -15,6 +15,7 @@ from popgen_genotyping.jobs.export_cohort_datasets_job import run_export_cohort_
 from popgen_genotyping.jobs.gtc_to_bcfs_job import run_gtc_to_bcfs
 from popgen_genotyping.jobs.merge_plink_job import run_merge_plink
 from popgen_genotyping.jobs.plink2_qc_job import run_plink2_qc
+from popgen_genotyping.jobs.plink2_to_plink1_job import run_plink2_to_plink1
 from popgen_genotyping.metamist_utils import (
     query_reported_sex,
     resolve_cohort_gtc_mapping,
@@ -204,20 +205,47 @@ class MergeCohortPlink(MultiCohortStage):
             ['popgen_genotyping', 'rolling_aggregate', 'previous_analysis_id'], default=None
         )
 
-        previous_aggregate_paths: list[dict[str, str]] | None = None
+        previous_aggregate_plink1_paths: list[dict[str, str]] | None = None
         samples_to_remove: list[str] | None = None
+        merge_job_dependencies: list[BashJob] = []
 
         if prev_analysis_id:
-            previous_aggregate_paths, samples_to_remove = resolve_rolling_aggregate(prev_analysis_id=prev_analysis_id)
+            # A previous aggregate exists in PLINK2 format, so we need to convert it to PLINK1.9
+
+            previous_aggregate_plink2_paths, samples_to_remove = resolve_rolling_aggregate(
+                prev_analysis_id=prev_analysis_id
+            )
+
+            # Define an output prefix for the converted PLINK1.9 files in tmp storage
+            plink1_prefix = get_output_prefix(
+                dataset=multicohort.analysis_dataset, stage_name='Plink2ToPlink1', tmp=True
+            )
+
+            conversion_job, converted_plink1_resource = run_plink2_to_plink1(
+                pfile_prefix=previous_aggregate_plink2_paths,
+                output_prefix=str(plink1_prefix),
+                job_name='Plink2ToPlink1',
+            )
+            merge_job_dependencies.append(conversion_job)
+
+            # The converted PLINK1.9 files become the previous aggregate for the merge job
+            previous_aggregate_plink1_paths = {
+                'bed': str(converted_plink1_resource.bed),
+                'bim': str(converted_plink1_resource.bim),
+                'fam': str(converted_plink1_resource.fam),
+            }
 
         # 3. Call merge job
         j: BashJob = run_merge_plink(
             cohort_plink_paths=cohort_plink_paths,
             output_prefix=str(object=outputs['bed']).replace('.bed', ''),
-            previous_aggregate_paths=previous_aggregate_paths,
+            previous_aggregate_paths=previous_aggregate_plink1_paths,
             samples_to_remove=samples_to_remove,
             job_name='MergeCohortPlink',
         )
+
+        if merge_job_dependencies:
+            j.depends_on(*merge_job_dependencies)
 
         return self.make_outputs(multicohort, data=outputs, jobs=[j])
 

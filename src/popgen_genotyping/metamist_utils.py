@@ -310,15 +310,15 @@ def resolve_rolling_aggregate(prev_analysis_id: int | str) -> tuple[dict[str, st
 
     prev_outputs, active_sg_ids = query_previous_aggregate(int(prev_analysis_id))
 
-    # Expecting PLINK 1.9 BED/BIM/FAM in outputs
+    # Expecting PLINK 2.0 PGEN/PVAR/PSAM in outputs
     previous_aggregate_paths: dict[str, str] = {
-        'bed': prev_outputs['bed'],
-        'bim': prev_outputs['bim'],
-        'fam': prev_outputs['fam'],
+        'pgen': prev_outputs['pgen'],
+        'pvar': prev_outputs['pvar'],
+        'psam': prev_outputs['psam'],
     }
 
-    # Parse the previous .fam to find all samples that were in the aggregate
-    prev_samples: list[str] = parse_psam(previous_aggregate_paths['fam'])
+    # Parse the previous .psam to find all samples that were in the aggregate
+    prev_samples: list[str] = parse_psam(previous_aggregate_paths['psam'])
 
     # Find samples that are in the previous aggregate but no longer active
     samples_to_remove: list[str] = list(set(prev_samples) - set(active_sg_ids))
