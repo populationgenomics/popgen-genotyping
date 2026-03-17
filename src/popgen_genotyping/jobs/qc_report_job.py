@@ -45,7 +45,7 @@ def run_qc_report(
     # Read in all bafregress files, then convert to
     # space-separated string of files as input to script.
     bafregress_files = [b.read_input(path) for path in bafregress_paths]
-    bafregress_bash_args = " ".join([str(f) for f in bafregress_files])
+    bafregress_bash_args = ' '.join([str(f) for f in bafregress_files])
 
     # Define output file
     j.declare_resource_group(
