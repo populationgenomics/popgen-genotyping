@@ -55,6 +55,7 @@ def run_qc_report(
     j.command(
         f"""
         set -ex
+        cat <<EOF > merge_qc.py
 import pandas as pd
 import sys
 
