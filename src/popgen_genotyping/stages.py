@@ -350,9 +350,7 @@ class QcReport(MultiCohortStage):
         """
         Define the expected QC report output file for the multi-cohort.
         """
-        prefix: Path = get_output_prefix(
-            dataset=multicohort.analysis_dataset, stage_name=self.name
-        )
+        prefix: Path = get_output_prefix(dataset=multicohort.analysis_dataset, stage_name=self.name)
         return {
             'qc_report_csv': prefix / 'qc_report.csv',
         }
@@ -364,19 +362,12 @@ class QcReport(MultiCohortStage):
         outputs: dict[str, Path] = self.expected_outputs(multicohort=multicohort)
 
         # Get the plink2_qc_prefix from the Plink2Qc stage's 'smiss' output
-        plink_qc_smiss_path: Path = inputs.as_path(
-            target=multicohort, stage=Plink2Qc, key='smiss'
-        )
+        plink_qc_smiss_path: Path = inputs.as_path(target=multicohort, stage=Plink2Qc, key='smiss')
         plink_qc_prefix = str(plink_qc_smiss_path).removesuffix('.smiss')
 
         # Get all bafregress output paths from all cohorts
-        bafregress_outputs: dict[str, dict[str, Path]] = inputs.as_dict_by_target(
-            stage=BafRegress
-        )
-        bafregress_paths: list[str] = [
-            str(baf_out['bafregress_txt'])
-            for baf_out in bafregress_outputs.values()
-        ]
+        bafregress_outputs: dict[str, dict[str, Path]] = inputs.as_dict_by_target(stage=BafRegress)
+        bafregress_paths: list[str] = [str(baf_out['bafregress_txt']) for baf_out in bafregress_outputs.values()]
 
         # Call the Hail Batch job function
         j: BashJob = run_qc_report(
@@ -388,4 +379,3 @@ class QcReport(MultiCohortStage):
 
         # Return the expected outputs of this stage
         return self.make_outputs(multicohort, data=outputs, jobs=[j])
-
