@@ -44,10 +44,10 @@ def run_gtc_to_bcfs(samples: list[str], gtc_paths: list[str]) -> tuple[Path, Pat
     light_int: str = to_container(light_bcf)
 
     gtc_cmd: str = (
-        f"bash -c 'mkdir -p /dev/shm/bcftools-tmp && "
+        f"bash -c 'mkdir -p ./bcftools-tmp && "
         f'bcftools +gtc2vcf --do-not-check-bpm -b {bpm_int} -e {egt_int} -f {fasta_int} {gtc_args} | '
         f'bcftools norm -m -both --no-version -c x -f {fasta_int} | '
-        f'bcftools sort -T /dev/shm/bcftools-tmp | '
+        f'bcftools sort -T ./bcftools-tmp | '
         f'bcftools reheader -s {map_int} | '
         f'bcftools view -O b -o {heavy_int} --write-index && '
         f"bcftools annotate --no-version -x ^FORMAT/GT,FORMAT/GQ {heavy_int} -O b -o {light_int} --write-index'"
