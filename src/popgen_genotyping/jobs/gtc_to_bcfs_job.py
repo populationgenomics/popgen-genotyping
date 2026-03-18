@@ -19,7 +19,9 @@ def run_gtc_to_bcfs(
     gtc_paths: list[str],
     sample_mapping: dict[str, str],
     output_heavy_bcf_path: str,
+    output_heavy_bcf_index_path: str,
     output_light_bcf_path: str,
+    output_light_bcf_index_path: str,
     output_metadata_path: str,
     bpm_manifest_path: str,
     egt_cluster_path: str,
@@ -91,17 +93,19 @@ EOF
         bcftools norm -m -both --no-version -c x -f {fasta_file.base} | \\
         bcftools sort -T $BATCH_TMPDIR/bcftools-tmp | \\
         bcftools reheader -s reheader_map.txt | \\
-        bcftools view -O b -o {j.heavy_bcf} --write-index
+        bcftools view -O b -o {j.heavy_bcf} --write-index=csi
 
         bcftools annotate --no-version -x ^FORMAT/GT,FORMAT/GQ {j.heavy_bcf} \\
-        -O b -o {j.light_bcf} --write-index
+        -O b -o {j.light_bcf} --write-index=csi
 
         mv metadata_raw.tsv {j.metadata_tsv}
         """
     )
 
-    b.write_output(j.heavy_bcf, output_heavy_bcf_path.replace('.bcf', ''))
-    b.write_output(j.light_bcf, output_light_bcf_path.replace('.bcf', ''))
+    b.write_output(j.heavy_bcf, output_heavy_bcf_path)
+    b.write_output(j.heavy_bcf_index, output_heavy_bcf_path + '.csi')
+    b.write_output(j.light_bcf, output_light_bcf_path)
+    b.write_output(j.light_bcf_index, output_light_bcf_path + '.csi')
     b.write_output(j.metadata_tsv, output_metadata_path)
 
     return j

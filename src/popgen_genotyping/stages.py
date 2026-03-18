@@ -45,7 +45,9 @@ class GtcToBcfs(CohortStage):
         prefix: Path = get_output_prefix(dataset=cohort.dataset, stage_name=self.name, tmp=True)
         return {
             'heavy_bcf': prefix / f'{cohort.id}.heavy.bcf',
+            'heavy_bcf_index': prefix / f'{cohort.id}.heavy.bcf.csi',
             'light_bcf': prefix / f'{cohort.id}.light.bcf',
+            'light_bcf_index': prefix / f'{cohort.id}.light.bcf.csi',
             'metadata_tsv': prefix / f'{cohort.id}_gtc_metadata.tsv',
         }
 
@@ -71,7 +73,9 @@ class GtcToBcfs(CohortStage):
             gtc_paths=gtc_paths,
             sample_mapping=sample_mapping,
             output_heavy_bcf_path=str(outputs['heavy_bcf']),
+            output_heavy_bcf_index_path=str(outputs['heavy_bcf_index']),
             output_light_bcf_path=str(outputs['light_bcf']),
+            output_light_bcf_index_path=str(outputs['light_bcf_index']),
             output_metadata_path=str(outputs['metadata_tsv']),
             bpm_manifest_path=bpm_manifest,
             egt_cluster_path=egt_cluster,
