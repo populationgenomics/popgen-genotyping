@@ -2,6 +2,8 @@
 Job logic for exporting merged cohort PLINK 1.9 data to PLINK2 and BCF formats.
 """
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING
 
 from cpg_utils.config import config_retrieve
@@ -16,7 +18,7 @@ def run_export_cohort_datasets(
     input_plink_prefix: dict[str, str],
     output_prefix: str,
     job_name: str = 'export_cohort_datasets',
-) -> 'BashJob':
+) -> BashJob:
     """
     Convert PLINK 1.9 BED/BIM/FAM to PLINK2 (PGEN/PVAR/PSAM) and BCF.
 

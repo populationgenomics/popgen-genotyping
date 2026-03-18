@@ -2,6 +2,8 @@
 Combined job to convert multiple GTCs to cohort-level Heavy and Light BCFs.
 """
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING
 
 from cpg_utils.config import config_retrieve
@@ -23,7 +25,7 @@ def run_gtc_to_bcfs(
     egt_cluster_path: str,
     fasta_ref_path: str,
     job_name: str = 'GtcToBcfs',
-) -> 'BashJob':
+) -> BashJob:
     """
     Queue a job to convert multiple Illumina GTC files to a multi-sample cohort BCF.
 

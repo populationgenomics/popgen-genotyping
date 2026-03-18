@@ -2,6 +2,8 @@
 Job logic for estimating sample contamination using BAFRegress.
 """
 
+from __future__ import annotations
+
 from hailtop.batch.job import BashJob
 from cpg_utils.config import config_retrieve
 from cpg_utils.hail_batch import get_batch
@@ -13,7 +15,7 @@ def run_bafregress(
     output_path: str,
     af_ref_path: str | None = None,
     job_name: str = 'bafregress',
-) -> 'BashJob':
+) -> BashJob:
     """
     Run BAFRegress on a BCF file to estimate sample contamination.
 

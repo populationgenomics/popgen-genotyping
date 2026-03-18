@@ -2,6 +2,8 @@
 Job logic for converting a cohort-level multi-sample BCF into a PLINK 1.9 dataset.
 """
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING
 
 from cpg_utils.config import config_retrieve
@@ -18,7 +20,7 @@ def run_cohort_bcf_to_plink(
     output_prefix: str,
     sex_mapping: dict[str, str] | None = None,
     job_name: str = 'cohort_bcf_to_plink',
-) -> 'BashJob':
+) -> BashJob:
     """
     Directly convert a multi-sample cohort BCF to PLINK 1.9 format using PLINK2.
 

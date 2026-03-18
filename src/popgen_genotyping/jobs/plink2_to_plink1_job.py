@@ -2,6 +2,8 @@
 Job logic for converting a PLINK2 fileset to PLINK 1.9 format.
 """
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING
 
 from cpg_utils.config import config_retrieve
@@ -17,7 +19,7 @@ def run_plink2_to_plink1(
     pfile_prefix: dict[str, str],
     output_prefix: str,
     job_name: str = 'plink2_to_plink1',
-) -> tuple['BashJob', 'ResourceGroup']:
+) -> tuple[BashJob, ResourceGroup]:
     """
     Convert a PLINK2 fileset (.pgen, .pvar, .psam) to PLINK 1.9 format (.bed, .bim, .fam).
 

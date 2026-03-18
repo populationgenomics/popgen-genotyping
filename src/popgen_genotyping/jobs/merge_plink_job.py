@@ -2,6 +2,8 @@
 Job logic for merging multiple cohort PLINK 1.9 datasets into a single unified dataset.
 """
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING
 
 from cpg_utils import to_path
@@ -19,7 +21,7 @@ def run_merge_plink(
     previous_aggregate_paths: dict[str, str] | None = None,
     samples_to_remove: list[str] | None = None,
     job_name: str = 'merge_cohort_plink',
-) -> 'BashJob':
+) -> BashJob:
     """
     Merge multiple PLINK 1.9 datasets into a single unified dataset, with rolling aggregate support.
 

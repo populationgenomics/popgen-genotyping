@@ -71,9 +71,9 @@ class GtcToBcfs(CohortStage):
         j: BashJob = run_gtc_to_bcfs(
             gtc_paths=gtc_paths,
             sample_mapping=sample_mapping,
-            output_heavy_bcf_path=str(object=outputs['heavy_bcf']),
-            output_light_bcf_path=str(object=outputs['light_bcf']),
-            output_metadata_path=str(object=outputs['metadata_tsv']),
+            output_heavy_bcf_path=str(outputs['heavy_bcf']),
+            output_light_bcf_path=str(outputs['light_bcf']),
+            output_metadata_path=str(outputs['metadata_tsv']),
             bpm_manifest_path=bpm_manifest,
             egt_cluster_path=egt_cluster,
             fasta_ref_path=fasta_ref,
@@ -111,8 +111,8 @@ class BafRegress(CohortStage):
         af_ref_path: str | None = config_retrieve(['popgen_genotyping', 'references', 'af_ref_path'], default=None)
 
         j: BashJob = run_bafregress(
-            bcf_path=str(object=heavy_bcf_path),
-            output_path=str(object=outputs['bafregress_txt']),
+            bcf_path=str(heavy_bcf_path),
+            output_path=str(outputs['bafregress_txt']),
             af_ref_path=af_ref_path,
             job_name=f'BafRegress_{cohort.name}',
         )
@@ -157,8 +157,8 @@ class CohortBcfToPlink(CohortStage):
 
         # Define the job via the job utility
         j: BashJob = run_cohort_bcf_to_plink(
-            bcf_path=str(object=light_bcf_path),
-            output_prefix=str(object=outputs['bed']).replace('.bed', ''),
+            bcf_path=str(light_bcf_path),
+            output_prefix=str(outputs['bed']).replace('.bed', ''),
             sex_mapping=sex_mapping,
             job_name=f'CohortBcfToPlink_{cohort.name}',
         )
@@ -208,7 +208,7 @@ class MergeCohortPlink(MultiCohortStage):
             ['popgen_genotyping', 'rolling_aggregate', 'previous_analysis_id'], default=None
         )
 
-        previous_aggregate_plink1_paths: list[dict[str, str]] | None = None
+        previous_aggregate_plink1_paths: dict[str, str] | None = None
         samples_to_remove: list[str] | None = None
         merge_job_dependencies: list[BashJob] = []
 
@@ -241,7 +241,7 @@ class MergeCohortPlink(MultiCohortStage):
         # 3. Call merge job
         j: BashJob = run_merge_plink(
             cohort_plink_paths=cohort_plink_paths,
-            output_prefix=str(object=outputs['bed']).replace('.bed', ''),
+            output_prefix=str(outputs['bed']).replace('.bed', ''),
             previous_aggregate_paths=previous_aggregate_plink1_paths,
             samples_to_remove=samples_to_remove,
             job_name='MergeCohortPlink',
@@ -287,11 +287,11 @@ class ExportCohortDatasets(MultiCohortStage):
         # 2. Call export job
         j: BashJob = run_export_cohort_datasets(
             input_plink_prefix={
-                'bed': str(object=input_plink['bed']),
-                'bim': str(object=input_plink['bim']),
-                'fam': str(object=input_plink['fam']),
+                'bed': str(input_plink['bed']),
+                'bim': str(input_plink['bim']),
+                'fam': str(input_plink['fam']),
             },
-            output_prefix=str(object=outputs['pgen']).replace('.pgen', ''),
+            output_prefix=str(outputs['pgen']).replace('.pgen', ''),
             job_name='ExportCohortDatasets',
         )
 
@@ -330,11 +330,11 @@ class Plink2Qc(MultiCohortStage):
         input_plink_pgen: Path = inputs.as_path(target=multicohort, stage=ExportCohortDatasets, key='pgen')
 
         # The outputs_path for the run_plink2_qc job is the base prefix for all QC files.
-        output_plink2_prefix = str(object=outputs['smiss']).removesuffix('.smiss')
+        output_plink2_prefix = str(outputs['smiss']).removesuffix('.smiss')
 
         # Call the Hail Batch job function
         j: BashJob = run_plink2_qc(
-            pgen_path=str(object=input_plink_pgen),
+            pgen_path=str(input_plink_pgen),
             outputs_path=output_plink2_prefix,
             job_name=f'Plink2Qc_{multicohort.name}',
         )

@@ -2,6 +2,8 @@
 Standard utilities and constants for the genotyping pipeline.
 """
 
+from __future__ import annotations
+
 import csv
 from typing import TYPE_CHECKING
 
@@ -18,7 +20,7 @@ if TYPE_CHECKING:
 FAM_COLUMN_COUNT: int = 6
 
 
-def get_output_prefix(dataset: 'Dataset', stage_name: str, tmp: bool = False) -> 'Path':
+def get_output_prefix(dataset: Dataset, stage_name: str, tmp: bool = False) -> Path:
     """
     Standardised output prefix for all stages.
 
@@ -35,7 +37,7 @@ def get_output_prefix(dataset: 'Dataset', stage_name: str, tmp: bool = False) ->
     return prefix / get_workflow().name / stage_name / str(version)
 
 
-def get_sequencing_group_cohort(sequencing_group: 'SequencingGroup') -> 'Cohort':
+def get_sequencing_group_cohort(sequencing_group: SequencingGroup) -> Cohort:
     """
     Resolve the cohort a sequencing group belongs to by searching the multi-cohort.
 
@@ -94,14 +96,14 @@ def parse_psam(psam_path: str | Path) -> list[str]:
 
 
 def register_job(
-    batch: 'Batch',
+    batch: Batch,
     job_name: str,
     config_path: list[str],
     image: str | None = None,
     default_cpu: int = 1,
     default_memory: str = 'standard',
     default_storage: str = '10G',
-) -> 'BashJob':
+) -> BashJob:
     """
     Initialize a Hail Batch job with standard configuration from the project config.
 
