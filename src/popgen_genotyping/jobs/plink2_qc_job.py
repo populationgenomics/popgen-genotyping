@@ -4,6 +4,7 @@ Plink2 outputs from pgen/pvar
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from cpg_utils.config import config_retrieve
@@ -53,16 +54,19 @@ def run_plink2_qc(
         psam=psam_path,
     )
 
-    # Define output files
+    # Define output files with datestamp prefix
+    datestamp: str = datetime.now(tz=timezone.utc).strftime('%Y%m%d')
+    output_base = f'{datestamp}_qc'
+
     j.declare_resource_group(
         plink_qc_outputs={
-            'smiss': '{root}.smiss',
-            'vmiss': '{root}.vmiss',
-            'afreq': '{root}.afreq',
-            'hwe': '{root}.hwe',
-            'het': '{root}.het',
-            'sexcheck': '{root}.sexcheck',
-            'kin': '{root}.kin',
+            'smiss': f'{{root}}/{output_base}.smiss',
+            'vmiss': f'{{root}}/{output_base}.vmiss',
+            'afreq': f'{{root}}/{output_base}.afreq',
+            'hwe': f'{{root}}/{output_base}.hwe',
+            'het': f'{{root}}/{output_base}.het',
+            'sexcheck': f'{{root}}/{output_base}.sexcheck',
+            'kin': f'{{root}}/{output_base}.kin',
         },
     )
 
@@ -81,7 +85,7 @@ def run_plink2_qc(
             --het \\
             --check-sex {check_sex_args} \\
             --make-king-table \\
-            --out {j.plink_qc_outputs.root}
+            --out {j.plink_qc_outputs}/{output_base}
         """
     )
 
