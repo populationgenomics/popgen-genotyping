@@ -33,7 +33,7 @@ def get_output_prefix(dataset: Dataset, stage_name: str, tmp: bool = False) -> P
         Path: The resolved cloud path prefix.
     """
     version: int = config_retrieve(['workflow', 'version'], 1)
-    prefix: Path = dataset.prefix(category='tmp' if tmp else 'main')
+    prefix: Path = dataset.prefix(category='tmp' if tmp else 'default')
     return prefix / get_workflow().name / stage_name / str(version)
 
 
