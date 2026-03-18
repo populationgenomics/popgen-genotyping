@@ -91,10 +91,10 @@ EOF
         bcftools norm -m -both --no-version -c x -f {fasta_file.base} | \\
         bcftools sort -T $BATCH_TMPDIR/bcftools-tmp | \\
         bcftools reheader -s reheader_map.txt | \\
-        bcftools view -O b -o {j.heavy_bcf} --write-index
+        bcftools view -O b -o {j.heavy_bcf} --write-index=csi
 
         bcftools annotate --no-version -x ^FORMAT/GT,FORMAT/GQ {j.heavy_bcf} \\
-        -O b -o {j.light_bcf} --write-index
+        -O b -o {j.light_bcf} --write-index=csi
 
         mv metadata_raw.tsv {j.metadata_tsv}
         """
