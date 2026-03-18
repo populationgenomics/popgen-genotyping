@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from datetime import datetime, timezone
+
 from cpg_flow.stage import CohortStage, MultiCohortStage, stage
 from cpg_utils.config import config_retrieve
 
@@ -43,9 +45,9 @@ class GtcToBcfs(CohortStage):
         """
         prefix: Path = get_output_prefix(dataset=cohort.analysis_dataset, stage_name=self.name, tmp=True)
         return {
-            'heavy_bcf': prefix / 'cohort.heavy.bcf',
-            'light_bcf': prefix / 'cohort.light.bcf',
-            'metadata_tsv': prefix / 'cohort_gtc_metadata.tsv',
+            'heavy_bcf': prefix / f'{cohort.id}.heavy.bcf',
+            'light_bcf': prefix / f'{cohort.id}.light.bcf',
+            'metadata_tsv': prefix / f'{cohort.id}_gtc_metadata.tsv',
         }
 
     def queue_jobs(self, cohort: Cohort, _inputs: StageInput) -> StageOutput:
@@ -93,7 +95,7 @@ class BafRegress(CohortStage):
         """
         prefix: Path = get_output_prefix(dataset=cohort.analysis_dataset, stage_name=self.name)
         return {
-            'bafregress_txt': prefix / 'cohort.BAFRegress.txt',
+            'bafregress_txt': prefix / f'{cohort.id}.BAFRegress.txt',
         }
 
     def queue_jobs(self, cohort: Cohort, inputs: StageInput) -> StageOutput:
@@ -132,9 +134,9 @@ class CohortBcfToPlink(CohortStage):
         # Store in tmp per requirement
         prefix: Path = get_output_prefix(dataset=cohort.analysis_dataset, stage_name=self.name, tmp=True)
         return {
-            'bed': prefix / 'cohort.bed',
-            'bim': prefix / 'cohort.bim',
-            'fam': prefix / 'cohort.fam',
+            'bed': prefix / f'{cohort.id}.bed',
+            'bim': prefix / f'{cohort.id}.bim',
+            'fam': prefix / f'{cohort.id}.fam',
         }
 
     def queue_jobs(self, cohort: Cohort, inputs: StageInput) -> StageOutput:
@@ -265,11 +267,12 @@ class ExportCohortDatasets(MultiCohortStage):
         """
         prefix: Path = get_output_prefix(dataset=multicohort.analysis_dataset, stage_name=self.name)
         tmp_bcf_prefix: Path = get_output_prefix(dataset=multicohort.analysis_dataset, stage_name=self.name, tmp=True)
+        datestamp: str = datetime.now(tz=timezone.utc).strftime('%Y%m%d')
         return {
-            'pgen': prefix / 'cohort.pgen',
-            'pvar': prefix / 'cohort.pvar',
-            'psam': prefix / 'cohort.psam',
-            'bcf': tmp_bcf_prefix / 'cohort.bcf',
+            'pgen': prefix / f'{datestamp}_cohort.pgen',
+            'pvar': prefix / f'{datestamp}_cohort.pvar',
+            'psam': prefix / f'{datestamp}_cohort.psam',
+            'bcf': tmp_bcf_prefix / f'{datestamp}_cohort.bcf',
         }
 
     def queue_jobs(self, multicohort: MultiCohort, inputs: StageInput) -> StageOutput:
@@ -351,8 +354,9 @@ class QcReport(MultiCohortStage):
         Define the expected QC report output file for the multi-cohort.
         """
         prefix: Path = get_output_prefix(dataset=multicohort.analysis_dataset, stage_name=self.name)
+        datestamp: str = datetime.now(tz=timezone.utc).strftime('%Y%m%d')
         return {
-            'qc_report_csv': prefix / 'qc_report.csv',
+            'qc_report_csv': prefix / f'{datestamp}_qc_report.csv',
         }
 
     def queue_jobs(self, multicohort: MultiCohort, inputs: StageInput) -> StageOutput:
