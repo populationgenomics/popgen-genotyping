@@ -34,7 +34,7 @@ def run_bafregress(
     j = register_job(
         batch=b,
         job_name=job_name,
-        config_path=['popgen_genotyping', 'bafregress'],
+        config_path=['popgen_genotyping', 'baf_regress'],
         image=config_retrieve(['workflow', 'bcftools_image']),
         default_cpu=1,
         default_storage='10G',

@@ -11,11 +11,11 @@ from datetime import datetime, timezone
 from cpg_flow.stage import CohortStage, MultiCohortStage, stage
 from cpg_utils.config import config_retrieve
 
-from popgen_genotyping.jobs.bafregress_job import run_bafregress
+from popgen_genotyping.jobs.baf_regress_job import run_bafregress
 from popgen_genotyping.jobs.cohort_bcf_to_plink_job import run_cohort_bcf_to_plink
 from popgen_genotyping.jobs.export_cohort_datasets_job import run_export_cohort_datasets
 from popgen_genotyping.jobs.gtc_to_bcfs_job import run_gtc_to_bcfs
-from popgen_genotyping.jobs.merge_plink_job import run_merge_plink
+from popgen_genotyping.jobs.merge_cohort_plink_job import run_merge_plink
 from popgen_genotyping.jobs.plink2_qc_job import run_plink2_qc
 from popgen_genotyping.jobs.plink2_to_plink1_job import run_plink2_to_plink1
 from popgen_genotyping.jobs.qc_report_job import run_qc_report
@@ -205,7 +205,7 @@ class MergeCohortPlink(MultiCohortStage):
 
         # 2. Check for rolling aggregate
         prev_analysis_id: str | None = config_retrieve(
-            ['popgen_genotyping', 'rolling_aggregate', 'previous_analysis_id'], default=None
+            ['popgen_genotyping', 'merge_cohort_plink', 'previous_analysis_id'], default=None
         )
 
         previous_aggregate_plink1_paths: dict[str, str] | None = None

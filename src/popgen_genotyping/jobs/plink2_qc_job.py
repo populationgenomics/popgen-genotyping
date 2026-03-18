@@ -36,7 +36,7 @@ def run_plink2_qc(
     j: BashJob = register_job(
         batch=b,
         job_name=job_name,
-        config_path=['popgen_genotyping', 'plink_qc'],
+        config_path=['popgen_genotyping', 'plink2_qc'],
         image=config_retrieve(['workflow', 'plink_image']),
         default_cpu=2,
         default_storage='50G',

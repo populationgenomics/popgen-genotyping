@@ -26,7 +26,7 @@ cpu = 2
 memory = 'standard'
 storage = '50G'
 
-[popgen_genotyping.bafregress]
+[popgen_genotyping.baf_regress]
 cpu = 1
 memory = 'standard'
 storage = '10G'
@@ -40,12 +40,27 @@ storage = '50G'
 cpu = 4
 memory = 'highmem'
 storage = '100G'
+# The Metamist analysis ID of the previous multi-cohort aggregate
+# previous_analysis_id = 123456
+
+[popgen_genotyping.export_cohort_datasets]
+cpu = 2
+memory = 'standard'
+storage = '50G'
+
+[popgen_genotyping.plink2_qc]
+cpu = 2
+memory = 'standard'
+storage = '20G'
+
+[popgen_genotyping.qc_report]
+cpu = 2
+memory = 'standard'
+storage = '20G'
 
 [popgen_genotyping.references]
 fasta_ref_path = 'gs://cpg-common-main/references/hg38/v0/Homo_sapiens_assembly38.fasta'
 bpm_manifest_path = 'gs://...'
 egt_cluster_path = 'gs://...'
-
-[popgen_genotyping.rolling_aggregate]
-# The Metamist analysis ID of the previous multi-cohort aggregate
-# previous_analysis_id = 123456
+# Optional: population allele frequency reference for BAFRegress
+# af_ref_path = 'gs://...'

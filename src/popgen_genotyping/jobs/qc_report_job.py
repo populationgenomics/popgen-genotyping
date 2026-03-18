@@ -35,7 +35,7 @@ def run_qc_report(
     j = register_job(
         batch=b,
         job_name=job_name,
-        config_path=['popgen_genotyping', 'merge_qc'],
+        config_path=['popgen_genotyping', 'qc_report'],
         image=get_driver_image(),
         default_cpu=2,
         default_storage='20G',
