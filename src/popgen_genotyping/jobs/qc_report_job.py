@@ -5,7 +5,7 @@ from __future__ import annotations
 from importlib.resources import files
 from typing import TYPE_CHECKING
 
-from cpg_utils.config import config_retrieve
+from cpg_utils.config import get_driver_image
 from cpg_utils.hail_batch import get_batch
 
 from popgen_genotyping.utils import register_job
@@ -36,7 +36,7 @@ def run_qc_report(
         batch=b,
         job_name=job_name,
         config_path=['popgen_genotyping', 'merge_qc'],
-        image=config_retrieve(['workflow', 'plink_image']),
+        image=get_driver_image(),
         default_cpu=2,
         default_storage='20G',
     )

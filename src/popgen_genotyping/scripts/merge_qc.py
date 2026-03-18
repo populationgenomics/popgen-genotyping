@@ -1,8 +1,9 @@
 """Merge PLINK2 QC data files and bafregress results into a single CSV summary."""
 
 import argparse
-import csv
 import sys
+
+import pandas as pd
 
 # KING kinship coefficient thresholds for relatedness degree classification.
 # Ref: Manichaikul et al. (2010), doi:10.1093/bioinformatics/btq559
@@ -11,73 +12,23 @@ KINSHIP_1ST: float = 0.177
 KINSHIP_2ND: float = 0.0884
 KINSHIP_3RD: float = 0.0442
 
+DEGREE_COLS: list[str] = ['RELATED_MZ', 'RELATED_1ST', 'RELATED_2ND', 'RELATED_3RD']
 
-def read_whitespace_file(filepath: str) -> list[dict[str, str]]:
-    """Read a whitespace-delimited file into a list of row dicts.
+
+def read_qc_file(filepath: str) -> pd.DataFrame:
+    """Read a whitespace-delimited PLINK2 QC file.
+
+    Strips leading ``#`` from column headers.
 
     Args:
         filepath: Path to the whitespace-delimited file.
 
     Returns:
-        List of dictionaries, one per row, keyed by column name.
+        DataFrame with cleaned column names.
     """
-    rows: list[dict[str, str]] = []
-    with open(filepath) as f:
-        header: list[str] | None = None
-        for line in f:
-            fields = line.strip().split()
-            if not fields:
-                continue
-            if header is None:
-                header = [col.lstrip('#') for col in fields]
-            else:
-                rows.append(dict(zip(header, fields, strict=False)))
-    return rows
-
-
-def index_by(rows: list[dict[str, str]], key: str) -> dict[str, dict[str, str]]:
-    """Build a lookup dict keyed by a single column value.
-
-    Args:
-        rows: List of row dicts.
-        key: Column name to index by.
-
-    Returns:
-        Dict mapping key values to row dicts.
-    """
-    return {row[key]: row for row in rows}
-
-
-def left_merge(
-    left: list[dict[str, str]],
-    right: list[dict[str, str]],
-    key: str,
-    suffix: str = '',
-) -> list[dict[str, str]]:
-    """Left-join two lists of row dicts on a single key column.
-
-    Args:
-        left: Left-side rows.
-        right: Right-side rows.
-        key: Column name to join on.
-        suffix: Suffix to append to duplicate column names from right.
-
-    Returns:
-        Merged list of row dicts.
-    """
-    right_idx = index_by(right, key)
-    left_cols: set[str] = {col for row in left for col in row}
-    merged: list[dict[str, str]] = []
-    for row in left:
-        new_row = dict(row)
-        match = right_idx.get(row[key], {})
-        for col, val in match.items():
-            if col == key:
-                continue
-            out_col = f'{col}{suffix}' if col in left_cols else col
-            new_row[out_col] = val
-        merged.append(new_row)
-    return merged
+    df = pd.read_csv(filepath, sep=r'\s+', engine='python')
+    df.columns = df.columns.str.lstrip('#')
+    return df
 
 
 def get_degree(kinship: float) -> str | None:
@@ -100,10 +51,7 @@ def get_degree(kinship: float) -> str | None:
     return None
 
 
-DEGREE_COLS: list[str] = ['RELATED_MZ', 'RELATED_1ST', 'RELATED_2ND', 'RELATED_3RD']
-
-
-def process_kinship(kin0_path: str) -> dict[str, dict[str, str]]:
+def process_kinship(kin0_path: str) -> pd.DataFrame:
     """Process a PLINK2 .kin0 file into per-sample relatedness columns.
 
     Each degree column contains semicolon-separated ``REL_ID:KINSHIP:IBS0`` strings.
@@ -112,96 +60,88 @@ def process_kinship(kin0_path: str) -> dict[str, dict[str, str]]:
         kin0_path: Path to the .kin0 file.
 
     Returns:
-        Dict keyed by IID, with values being dicts of degree columns.
+        DataFrame with IID and RELATED_MZ/1ST/2ND/3RD columns, or an empty
+        DataFrame with those columns if no relationships are found.
     """
-    rows = read_whitespace_file(kin0_path)
-    if not rows:
-        return {}
+    empty = pd.DataFrame(columns=['IID', *DEGREE_COLS])
+
+    kin_df = read_qc_file(kin0_path)
+    if kin_df.empty:
+        return empty
 
     required = {'IID1', 'IID2', 'KINSHIP', 'IBS0'}
-    if not required.issubset(rows[0].keys()):
+    if not required.issubset(kin_df.columns):
         print(
             'Warning: Expected IID1, IID2, KINSHIP, and IBS0 columns '
             "in .kin0 file but didn't find them.",
         )
-        return {}
+        return empty
 
-    # Build two-way pairs filtered to >= 3rd degree
-    pairs: list[tuple[str, str, float, float]] = []
-    for row in rows:
-        kinship = float(row['KINSHIP'])
-        if kinship < KINSHIP_3RD:
-            continue
-        ibs0 = float(row['IBS0'])
-        pairs.append((row['IID1'], row['IID2'], kinship, ibs0))
-        pairs.append((row['IID2'], row['IID1'], kinship, ibs0))
+    # Filter to >= 3rd degree
+    kin_df = kin_df[kin_df['KINSHIP'] >= KINSHIP_3RD]
+    if kin_df.empty:
+        return empty
 
-    if not pairs:
-        return {}
+    # Create two-way mapping
+    kin_1 = kin_df[['IID1', 'IID2', 'KINSHIP', 'IBS0']].copy()
+    kin_1.columns = pd.Index(['IID', 'REL_ID', 'KINSHIP', 'IBS0'])
 
-    # Group by (IID, degree)
-    grouped: dict[str, dict[str, list[str]]] = {}
-    for iid, rel_id, kinship, ibs0 in pairs:
-        degree = get_degree(kinship)
-        if degree is None:
-            continue
-        grouped.setdefault(iid, {}).setdefault(degree, []).append(
-            f'{rel_id}:{kinship:.4f}:{ibs0:.4f}',
-        )
+    kin_2 = kin_df[['IID2', 'IID1', 'KINSHIP', 'IBS0']].copy()
+    kin_2.columns = pd.Index(['IID', 'REL_ID', 'KINSHIP', 'IBS0'])
 
-    # Flatten to per-sample dicts
-    result: dict[str, dict[str, str]] = {}
-    for iid, degrees in grouped.items():
-        result[iid] = {deg: ';'.join(degrees.get(deg, [])) for deg in DEGREE_COLS}
-    return result
+    kin_stacked = pd.concat([kin_1, kin_2], ignore_index=True)
+
+    # Format the string payload: REL_ID:KINSHIP:IBS0
+    kin_stacked['REL_STR'] = (
+        kin_stacked['REL_ID'].astype(str)
+        + ':'
+        + kin_stacked['KINSHIP'].round(4).astype(str)
+        + ':'
+        + kin_stacked['IBS0'].round(4).astype(str)
+    )
+
+    # Categorise degrees
+    kin_stacked['DEGREE'] = kin_stacked['KINSHIP'].apply(get_degree)
+
+    # Group and pivot
+    kin_grouped = (
+        kin_stacked.groupby(['IID', 'DEGREE'])['REL_STR']
+        .apply(';'.join)
+        .reset_index()
+    )
+    kin_pivoted = kin_grouped.pivot_table(
+        index='IID', columns='DEGREE', values='REL_STR', aggfunc='first',
+    ).reset_index()
+
+    # Guarantee all degree columns exist
+    for col in DEGREE_COLS:
+        if col not in kin_pivoted.columns:
+            kin_pivoted[col] = pd.NA
+
+    return kin_pivoted[['IID', *DEGREE_COLS]]
 
 
-def process_bafregress(paths: list[str]) -> list[dict[str, str]]:
+def process_bafregress(paths: list[str]) -> pd.DataFrame:
     """Read and concatenate bafregress output files.
 
     Args:
         paths: List of paths to bafregress output files.
 
     Returns:
-        Combined list of row dicts with sample_id renamed to IID.
+        Combined DataFrame with sample_id renamed to IID, or empty DataFrame.
     """
-    all_rows: list[dict[str, str]] = []
+    dfs: list[pd.DataFrame] = []
     for path in paths:
         try:
-            rows = read_whitespace_file(path)
-            for row in rows:
-                if 'sample_id' in row:
-                    row['IID'] = row.pop('sample_id')
-                all_rows.append(row)
+            df = pd.read_csv(path, sep=r'\s+', engine='python')
+            dfs.append(df)
         except (OSError, ValueError) as e:
             print(f'Warning: Could not read bafregress file {path}. Error: {e}')
-    return all_rows
 
+    if not dfs:
+        return pd.DataFrame()
 
-def write_csv(rows: list[dict[str, str]], output_path: str) -> None:
-    """Write a list of row dicts to a CSV file.
-
-    Args:
-        rows: List of row dicts to write.
-        output_path: Path to the output CSV file.
-    """
-    if not rows:
-        print('Warning: No data to write.')
-        return
-
-    # Preserve column order from first row, then append any extras
-    fieldnames: list[str] = list(rows[0].keys())
-    seen: set[str] = set(fieldnames)
-    for row in rows[1:]:
-        for key in row:
-            if key not in seen:
-                fieldnames.append(key)
-                seen.add(key)
-
-    with open(output_path, 'w', newline='') as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
-        writer.writeheader()
-        writer.writerows(rows)
+    return pd.concat(dfs, ignore_index=True).rename(columns={'sample_id': 'IID'})
 
 
 def main() -> None:
@@ -224,39 +164,39 @@ def main() -> None:
 
     # Read PLINK2 QC files
     try:
-        smiss = read_whitespace_file(args.smiss)
-        het = read_whitespace_file(args.het)
-        sexcheck = read_whitespace_file(args.sexcheck)
+        smiss = read_qc_file(args.smiss)
+        het = read_qc_file(args.het)
+        sexcheck = read_qc_file(args.sexcheck)
     except (OSError, ValueError) as e:
         print(f'Error reading QC files: {e}')
         sys.exit(1)
 
-    # Merge smiss, het, sexcheck on IID
-    merged = left_merge(smiss, het, key='IID', suffix='_het')
-    merged = left_merge(merged, sexcheck, key='IID', suffix='_sex')
+    # Identify merge keys
+    merge_cols = [col for col in ['FID', 'IID'] if col in smiss.columns]
+
+    # Merge QC dataframes
+    merged = smiss.merge(het, on=merge_cols, suffixes=('', '_het'))
+    merged = merged.merge(sexcheck, on=merge_cols, suffixes=('', '_sex'))
 
     # Process kinship data
     try:
-        kin_data = process_kinship(args.kin0)
-        if kin_data:
-            for row in merged:
-                kin_row = kin_data.get(row.get('IID', ''), {})
-                for col in DEGREE_COLS:
-                    row[col] = kin_row.get(col, '')
-        else:
-            for row in merged:
-                for col in DEGREE_COLS:
-                    row[col] = ''
+        kin_pivoted = process_kinship(args.kin0)
+        merged = merged.merge(kin_pivoted, on='IID', how='left')
     except (OSError, ValueError, KeyError) as e:
         print(f'Warning: Could not process kinship file: {e}')
 
+    # Ensure degree columns exist even if kinship processing was skipped
+    for col in DEGREE_COLS:
+        if col not in merged.columns:
+            merged[col] = pd.NA
+
     # Process bafregress files
     if args.bafregress:
-        baf_rows = process_bafregress(args.bafregress)
-        if baf_rows:
-            merged = left_merge(merged, baf_rows, key='IID', suffix='_baf')
+        baf_df = process_bafregress(args.bafregress)
+        if not baf_df.empty:
+            merged = merged.merge(baf_df, on='IID', how='left', suffixes=('', '_baf'))
 
-    write_csv(merged, args.output)
+    merged.to_csv(args.output, index=False)
 
 
 if __name__ == '__main__':

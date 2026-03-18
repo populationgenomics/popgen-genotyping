@@ -25,6 +25,7 @@ classifiers=[
 dependencies=[
     'cpg-flow>=v1.0.1',
     'loguru',
+    'pandas>=2.0',
     'pydantic>=2.12',
 ]
 
