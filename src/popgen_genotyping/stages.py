@@ -4,9 +4,8 @@ This file exists to define all the Stages for the workflow.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from cpg_flow.stage import CohortStage, MultiCohortStage, stage
 from cpg_utils.config import config_retrieve
@@ -43,7 +42,7 @@ class GtcToBcfs(CohortStage):
         """
         Define the expected cohort-level multi-sample BCF and metadata outputs.
         """
-        prefix: Path = get_output_prefix(dataset=cohort.analysis_dataset, stage_name=self.name, tmp=True)
+        prefix: Path = get_output_prefix(dataset=cohort.dataset, stage_name=self.name, tmp=True)
         return {
             'heavy_bcf': prefix / f'{cohort.id}.heavy.bcf',
             'light_bcf': prefix / f'{cohort.id}.light.bcf',
@@ -93,7 +92,7 @@ class BafRegress(CohortStage):
         """
         Define the expected BAFRegress output text file for the cohort.
         """
-        prefix: Path = get_output_prefix(dataset=cohort.analysis_dataset, stage_name=self.name)
+        prefix: Path = get_output_prefix(dataset=cohort.dataset, stage_name=self.name)
         return {
             'bafregress_txt': prefix / f'{cohort.id}.BAFRegress.txt',
         }
@@ -132,7 +131,7 @@ class CohortBcfToPlink(CohortStage):
         Define the expected PLINK 1.9 binary fileset in temporary storage.
         """
         # Store in tmp per requirement
-        prefix: Path = get_output_prefix(dataset=cohort.analysis_dataset, stage_name=self.name, tmp=True)
+        prefix: Path = get_output_prefix(dataset=cohort.dataset, stage_name=self.name, tmp=True)
         return {
             'bed': prefix / f'{cohort.id}.bed',
             'bim': prefix / f'{cohort.id}.bim',
@@ -149,7 +148,7 @@ class CohortBcfToPlink(CohortStage):
         light_bcf_path: Path = inputs.as_path(target=cohort, stage=GtcToBcfs, key='light_bcf')
 
         # Fetch reported sex metadata for these SGs
-        full_sex_mapping: dict[str, str] = query_reported_sex(project=cohort.analysis_dataset.name)
+        full_sex_mapping: dict[str, str] = query_reported_sex(project=cohort.dataset.name)
         cohort_sg_ids: set[str] = set(cohort.get_sequencing_group_ids())
         sex_mapping: dict[str, str] = {
             sg_id: sex_code for sg_id, sex_code in full_sex_mapping.items() if sg_id in cohort_sg_ids
