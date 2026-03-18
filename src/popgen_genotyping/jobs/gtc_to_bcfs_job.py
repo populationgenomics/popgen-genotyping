@@ -73,7 +73,7 @@ def run_gtc_to_bcfs(
         f"""
         set -ex
 
-        mkdir -p ./bcftools-tmp
+        mkdir -p $BATCH_TMPDIR/bcftools-tmp
 
         # Create reheader mapping file inside the job
         cat <<EOF > reheader_map.txt
@@ -89,7 +89,7 @@ EOF
             --extra metadata_raw.tsv \\
             {gtc_arg} | \\
         bcftools norm -m -both --no-version -c x -f {fasta_file.base} | \\
-        bcftools sort -T ./bcftools-tmp | \\
+        bcftools sort -T $BATCH_TMPDIR/bcftools-tmp | \\
         bcftools reheader -s reheader_map.txt | \\
         bcftools view -O b -o {j.heavy_bcf} --write-index
 
