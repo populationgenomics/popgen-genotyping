@@ -106,7 +106,15 @@ def run_merge_plink(
     rest_prefixes = staged_prefixes[1:]
 
     if not rest_prefixes:
-        j.command(f'plink --bfile {first_prefix} --allow-extra-chr --make-bed --keep-allele-order --out {j.output_plink}')
+        j.command(
+            f"""
+            plink --bfile {first_prefix} \
+                --allow-extra-chr \
+                --make-bed \
+                --keep-allele-order \
+                --out {j.output_plink}'
+            """
+        )
     else:
         merge_list_content = '\n'.join(rest_prefixes)
         j.command(
@@ -115,7 +123,12 @@ def run_merge_plink(
 
             echo "{merge_list_content}" > mergelist.txt
 
-            plink --bfile {first_prefix} --merge-list mergelist.txt --allow-extra-chr --make-bed --keep-allele-order --out {j.output_plink}
+            plink --bfile {first_prefix} \
+                --merge-list mergelist.txt \
+                --allow-extra-chr \
+                --make-bed \
+                --keep-allele-order \
+                --out {j.output_plink}
             """
         )
 
