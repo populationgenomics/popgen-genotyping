@@ -21,7 +21,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     environment: 'development'
-    
+
     steps:
     - uses: actions/checkout@v4
 
@@ -47,7 +47,7 @@ jobs:
         if [[ "$IMAGE_TAG" == "latest" ]]; then
           IMAGE_TAG="${{ github.ref_name }}-latest"
         fi
-        
+
         # We assume the image is in the images-dev repository for testing
         docker run --rm \
           --shm-size=2gb \
