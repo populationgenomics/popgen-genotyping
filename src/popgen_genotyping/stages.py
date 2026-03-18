@@ -308,7 +308,8 @@ class Plink2Qc(MultiCohortStage):
         Define the expected PLINK2 QC output files for the multi-cohort.
         """
         prefix: Path = get_output_prefix(dataset=multicohort.analysis_dataset, stage_name=self.name)
-        output_base_name = 'plink2qc'
+        datestamp: str = datetime.now(tz=timezone.utc).strftime('%Y%m%d')
+        output_base_name = f'{datestamp}_qc'
         return {
             'smiss': prefix / f'{output_base_name}.smiss',
             'vmiss': prefix / f'{output_base_name}.vmiss',
