@@ -135,8 +135,7 @@ class TestProcessKinship:
         """Process a .kin0 file with one related pair."""
         path = _write(
             tmp_dir / 'test.kin0',
-            '#IID1\tIID2\tKINSHIP\tIBS0\n'
-            'S1\tS2\t0.25\t0.01\n',
+            '#IID1\tIID2\tKINSHIP\tIBS0\nS1\tS2\t0.25\t0.01\n',
         )
         result = process_kinship(path)
         assert 'S1' in result
@@ -148,8 +147,7 @@ class TestProcessKinship:
         """Pairs below 3rd degree threshold are excluded."""
         path = _write(
             tmp_dir / 'low.kin0',
-            '#IID1\tIID2\tKINSHIP\tIBS0\n'
-            'S1\tS2\t0.01\t0.5\n',
+            '#IID1\tIID2\tKINSHIP\tIBS0\nS1\tS2\t0.01\t0.5\n',
         )
         result = process_kinship(path)
         assert result == {}
@@ -173,9 +171,7 @@ class TestProcessKinship:
         """A sample with relationships at different degrees gets separate columns."""
         path = _write(
             tmp_dir / 'multi.kin0',
-            '#IID1\tIID2\tKINSHIP\tIBS0\n'
-            'S1\tS2\t0.25\t0.01\n'
-            'S1\tS3\t0.06\t0.1\n',
+            '#IID1\tIID2\tKINSHIP\tIBS0\nS1\tS2\t0.25\t0.01\nS1\tS3\t0.06\t0.1\n',
         )
         result = process_kinship(path)
         assert 'S2:0.2500:0.0100' in result['S1']['RELATED_1ST']
