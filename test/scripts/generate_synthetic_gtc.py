@@ -80,10 +80,10 @@ def generate_gtc(  # noqa: PLR0915
 
     # Genotypes: 1=AA, 2=AB, 3=BB, 0=NC
     gts: list[int] = []
-    for af in pop_afs:
-        p_aa: float = (1 - af) ** 2
-        p_ab: float = 2 * af * (1 - af)
-        p_bb: float = af**2
+    for pop_af in pop_afs:
+        p_aa: float = (1 - pop_af) ** 2
+        p_ab: float = 2 * pop_af * (1 - pop_af)
+        p_bb: float = pop_af**2
         gts.append(sample_rng.choices([1, 2, 3], weights=[p_aa, p_ab, p_bb], k=1)[0])
 
     # 3. BAF and LRR simulation
@@ -96,7 +96,7 @@ def generate_gtc(  # noqa: PLR0915
         if gt == 1:  # AA
             mu = (contamination * af) + drift
             baf_val = sample_rng.gauss(mu, sigma)
-        elif gt == 3:  # BB  # noqa: PLR2004
+        elif gt == 3:
             mu = 1.0 - (contamination * (1.0 - af)) + drift
             baf_val = sample_rng.gauss(mu, sigma)
         else:  # AB
@@ -130,7 +130,7 @@ def generate_gtc(  # noqa: PLR0915
     for g in gts:
         if g == 1:
             base_calls_list.append(b'AA')
-        elif g == 2:  # noqa: PLR2004
+        elif g == 2:
             base_calls_list.append(b'AB')
         else:
             base_calls_list.append(b'BB')
