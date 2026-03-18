@@ -70,7 +70,7 @@ def run_gtc_to_bcfs(
     # Create reheader mapping file content
     mapping_content = '\n'.join([f'{old} {new}' for old, new in sample_mapping.items()])
 
-    # Index outputs
+    # Outputs
     j.declare_resource_group(
         heavy_bcf={'heavy_bcf': '{root}.bcf', 'heavy_bcf_index': '{root}_index.csi'},
         light_bcf={'light_bcf': '{root}.bcf', 'light_bcf_index': '{root}_index.csi'},
