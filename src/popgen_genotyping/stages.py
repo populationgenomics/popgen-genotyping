@@ -43,7 +43,7 @@ class GtcToBcfs(CohortStage):
         """
         Define the expected cohort-level multi-sample BCF and metadata outputs.
         """
-        prefix: Path = get_output_prefix(dataset=cohort.analysis_dataset, stage_name=self.name, tmp=True)
+        prefix: Path = get_output_prefix(dataset=cohort.dataset, stage_name=self.name, tmp=True)
         return {
             'heavy_bcf': prefix / f'{cohort.id}.heavy.bcf',
             'light_bcf': prefix / f'{cohort.id}.light.bcf',
@@ -93,7 +93,7 @@ class BafRegress(CohortStage):
         """
         Define the expected BAFRegress output text file for the cohort.
         """
-        prefix: Path = get_output_prefix(dataset=cohort.analysis_dataset, stage_name=self.name)
+        prefix: Path = get_output_prefix(dataset=cohort.dataset, stage_name=self.name)
         return {
             'bafregress_txt': prefix / f'{cohort.id}.BAFRegress.txt',
         }
@@ -132,7 +132,7 @@ class CohortBcfToPlink(CohortStage):
         Define the expected PLINK 1.9 binary fileset in temporary storage.
         """
         # Store in tmp per requirement
-        prefix: Path = get_output_prefix(dataset=cohort.analysis_dataset, stage_name=self.name, tmp=True)
+        prefix: Path = get_output_prefix(dataset=cohort.dataset, stage_name=self.name, tmp=True)
         return {
             'bed': prefix / f'{cohort.id}.bed',
             'bim': prefix / f'{cohort.id}.bim',
@@ -149,7 +149,7 @@ class CohortBcfToPlink(CohortStage):
         light_bcf_path: Path = inputs.as_path(target=cohort, stage=GtcToBcfs, key='light_bcf')
 
         # Fetch reported sex metadata for these SGs
-        full_sex_mapping: dict[str, str] = query_reported_sex(project=cohort.analysis_dataset.name)
+        full_sex_mapping: dict[str, str] = query_reported_sex(project=cohort.dataset.name)
         cohort_sg_ids: set[str] = set(cohort.get_sequencing_group_ids())
         sex_mapping: dict[str, str] = {
             sg_id: sex_code for sg_id, sex_code in full_sex_mapping.items() if sg_id in cohort_sg_ids
@@ -178,7 +178,7 @@ class MergeCohortPlink(MultiCohortStage):
         Define the expected multi-cohort PLINK 1.9 fileset in temporary storage.
         """
         # Store in tmp per requirement
-        prefix: Path = get_output_prefix(dataset=multicohort.analysis_dataset, stage_name=self.name, tmp=True)
+        prefix: Path = get_output_prefix(dataset=multicohort.dataset, stage_name=self.name, tmp=True)
         return {
             'bed': prefix / 'merged_cohorts.bed',
             'bim': prefix / 'merged_cohorts.bim',
@@ -221,7 +221,7 @@ class MergeCohortPlink(MultiCohortStage):
 
             # Define an output prefix for the converted PLINK1.9 files in tmp storage
             plink1_prefix = get_output_prefix(
-                dataset=multicohort.analysis_dataset, stage_name='Plink2ToPlink1', tmp=True
+                dataset=multicohort.dataset, stage_name='Plink2ToPlink1', tmp=True
             )
 
             conversion_job, converted_plink1_resource = run_plink2_to_plink1(
@@ -265,8 +265,8 @@ class ExportCohortDatasets(MultiCohortStage):
         Define the expected PLINK2 outputs to long-term storage.
         BCF output goes to tmp for analysis, as it is too large for long term storage.
         """
-        prefix: Path = get_output_prefix(dataset=multicohort.analysis_dataset, stage_name=self.name)
-        tmp_bcf_prefix: Path = get_output_prefix(dataset=multicohort.analysis_dataset, stage_name=self.name, tmp=True)
+        prefix: Path = get_output_prefix(dataset=multicohort.dataset, stage_name=self.name)
+        tmp_bcf_prefix: Path = get_output_prefix(dataset=multicohort.dataset, stage_name=self.name, tmp=True)
         datestamp: str = datetime.now(tz=timezone.utc).strftime('%Y%m%d')
         return {
             'pgen': prefix / f'{datestamp}_cohort.pgen',
@@ -308,7 +308,7 @@ class Plink2Qc(MultiCohortStage):
         """
         Define the expected PLINK2 QC output files for the multi-cohort.
         """
-        prefix: Path = get_output_prefix(dataset=multicohort.analysis_dataset, stage_name=self.name)
+        prefix: Path = get_output_prefix(dataset=multicohort.dataset, stage_name=self.name)
         output_base_name = 'plink2qc'
         return {
             'smiss': prefix / f'{output_base_name}.smiss',
@@ -353,7 +353,7 @@ class QcReport(MultiCohortStage):
         """
         Define the expected QC report output file for the multi-cohort.
         """
-        prefix: Path = get_output_prefix(dataset=multicohort.analysis_dataset, stage_name=self.name)
+        prefix: Path = get_output_prefix(dataset=multicohort.dataset, stage_name=self.name)
         datestamp: str = datetime.now(tz=timezone.utc).strftime('%Y%m%d')
         return {
             'qc_report_csv': prefix / f'{datestamp}_qc_report.csv',
