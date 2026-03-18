@@ -37,9 +37,7 @@ def run_bafregress(heavy_bcf_host: Path, af_ref_int: str | None = None) -> Path:
     else:
         # Estimate AF from the cohort itself if no reference is provided
         print('No AF reference provided. Estimating AF from the cohort using fill-tags...')
-        baf_cmd: str = (
-            f"bash -c 'bcftools +fill-tags {heavy_int} -- -t AF | bcftools +BAFregress --tag AF > {baf_out_int}'"
-        )
+        baf_cmd = f"bash -c 'bcftools +fill-tags {heavy_int} -- -t AF | bcftools +BAFregress --tag AF > {baf_out_int}'"
 
     run_docker(BCFTOOLS_IMAGE, baf_cmd)
 

@@ -99,6 +99,7 @@ ignore = [
     "G004", # Logging statement uses f-string
     "PLW0603", # Using the global statement to update `<VAR>` is discouraged
     "Q000", # Single quotes found but double quotes preferred
+    "Q003", # Change outer quotes to avoid escaping
     "S101", # Use of assert detected
     "PLR0912", # Too many branches (> 12)
     "PLR0913", # Too many arguments in function (> 5)

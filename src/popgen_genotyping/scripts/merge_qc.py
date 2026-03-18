@@ -103,13 +103,12 @@ def process_kinship(kin0_path: str) -> pd.DataFrame:
     kin_stacked['DEGREE'] = kin_stacked['KINSHIP'].apply(get_degree)
 
     # Group and pivot
-    kin_grouped = (
-        kin_stacked.groupby(['IID', 'DEGREE'])['REL_STR']
-        .apply(';'.join)
-        .reset_index()
-    )
+    kin_grouped = kin_stacked.groupby(['IID', 'DEGREE'])['REL_STR'].apply(';'.join).reset_index()
     kin_pivoted = kin_grouped.pivot_table(
-        index='IID', columns='DEGREE', values='REL_STR', aggfunc='first',
+        index='IID',
+        columns='DEGREE',
+        values='REL_STR',
+        aggfunc='first',
     ).reset_index()
 
     # Guarantee all degree columns exist

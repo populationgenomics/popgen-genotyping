@@ -194,20 +194,15 @@ class TestEndToEnd:
         )
         het_path = _write(
             tmp_dir / 'test.het',
-            '#FID\tIID\tO_HOM\tE_HOM\tN_NM\tF\n'
-            'FAM1\tS1\t500\t490\t1000\t0.02\n'
-            'FAM2\tS2\t510\t490\t1000\t0.04\n',
+            '#FID\tIID\tO_HOM\tE_HOM\tN_NM\tF\nFAM1\tS1\t500\t490\t1000\t0.02\nFAM2\tS2\t510\t490\t1000\t0.04\n',
         )
         sexcheck_path = _write(
             tmp_dir / 'test.sexcheck',
-            '#FID\tIID\tPEDSEX\tSNPSEX\tSTATUS\tF\n'
-            'FAM1\tS1\t1\t1\tOK\t0.99\n'
-            'FAM2\tS2\t2\t2\tOK\t0.01\n',
+            '#FID\tIID\tPEDSEX\tSNPSEX\tSTATUS\tF\nFAM1\tS1\t1\t1\tOK\t0.99\nFAM2\tS2\t2\t2\tOK\t0.01\n',
         )
         kin0_path = _write(
             tmp_dir / 'test.kin0',
-            '#IID1\tIID2\tKINSHIP\tIBS0\n'
-            'S1\tS2\t0.25\t0.01\n',
+            '#IID1\tIID2\tKINSHIP\tIBS0\nS1\tS2\t0.25\t0.01\n',
         )
         baf_path = _write(
             tmp_dir / 'baf.txt',
@@ -218,12 +213,18 @@ class TestEndToEnd:
         # Call main with sys.argv override
         sys_argv = [
             'merge_qc.py',
-            '--smiss', smiss_path,
-            '--het', het_path,
-            '--sexcheck', sexcheck_path,
-            '--kin0', kin0_path,
-            '--output', output_path,
-            '--bafregress', baf_path,
+            '--smiss',
+            smiss_path,
+            '--het',
+            het_path,
+            '--sexcheck',
+            sexcheck_path,
+            '--kin0',
+            kin0_path,
+            '--output',
+            output_path,
+            '--bafregress',
+            baf_path,
         ]
 
         original_argv = sys.argv

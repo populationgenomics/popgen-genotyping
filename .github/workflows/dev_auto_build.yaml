@@ -110,7 +110,7 @@ jobs:
           docker push "${{ env.IMAGES_PREFIX }}/${{ matrix.name }}:${{github.ref_name}}-${{ matrix.tag }}" | tee push.log
           # Push the latest tag
           docker push "${{ env.IMAGES_PREFIX }}/${{ matrix.name }}:${{github.ref_name}}-latest"
-          
+
           digest=$(grep 'digest:' push.log | grep -o 'sha256:[0-9a-f]*')
           echo ":package: Link to image:" >> $GITHUB_STEP_SUMMARY
           echo "https://console.cloud.google.com/artifacts/docker/cpg-common/australia-southeast1/images-dev/${{ matrix.name }}/$digest?project=cpg-common" >> $GITHUB_STEP_SUMMARY
@@ -185,7 +185,7 @@ jobs:
         run: |
           docker push "$IMAGE_FULL_TAG" | tee push.log
           docker push "$IMAGE_LATEST_TAG"
-          
+
           digest=$(grep 'digest:' push.log | head -n 1 | grep -o 'sha256:[0-9a-f]*')
           echo ":package: Link to image:" >> $GITHUB_STEP_SUMMARY
           echo "https://console.cloud.google.com/artifacts/docker/cpg-common/australia-southeast1/images-dev/$IMAGE_NAME/$digest?project=cpg-common" >> $GITHUB_STEP_SUMMARY

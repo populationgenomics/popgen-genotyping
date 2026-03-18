@@ -15,7 +15,7 @@ The pipeline is composed of several sequential stages, orchestrated by `cpg-flow
 - **BafRegress**: Estimates sample contamination by analyzing B-Allele Frequencies (BAF) against a population reference. If no reference is provided, it will estimate AF from the cohort.
 - **CohortBcfToPlink**: Converts the Light BCF into PLINK 1.9 binary format (`.bed`, `.bim`, `.fam`), preparing it for merging.
 - **MergeCohortPlink**: Merges PLINK files from multiple cohorts into a single, unified dataset. This stage also supports a "rolling aggregate" workflow, where new samples can be added to a previously generated aggregate.
-- **ExportCohortDatasets**: Converts the merged PLINK 1.9 dataset into PLINK2 (`.pgen`) format for long-term storage and analysis, and `.bcf` format in temporary storage for ancestry analysis. 
+- **ExportCohortDatasets**: Converts the merged PLINK 1.9 dataset into PLINK2 (`.pgen`) format for long-term storage and analysis, and `.bcf` format in temporary storage for ancestry analysis.
 - **Plink2Qc**: Performs a standard suite of quality control checks on the final PLINK2 dataset, including sample/variant missingness, allele frequency, HWE, heterozygosity, and kinship.
 
 ## Prerequisites
@@ -46,10 +46,10 @@ The pipeline is configured using a TOML file (e.g., `config.toml`). A template i
 To run the pipeline, use the `analysis-runner` command. You will need to specify the path to your configuration file, the output directory, and the script to execute.
 
 ```bash
-analysis-runner 
-    --dataset <your-dataset> 
-    --output-dir <output-directory> 
-    --config config.toml 
+analysis-runner
+    --dataset <your-dataset>
+    --output-dir <output-directory>
+    --config config.toml
     run_workflow.py
 ```
 

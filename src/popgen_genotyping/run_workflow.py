@@ -24,7 +24,7 @@ def cli_main() -> None:
     """
     parser = ArgumentParser(description='Genotyping microarray pipeline')
     parser.add_argument('--dry_run', action='store_true', help='Dry run')
-    args: ArgumentParser = parser.parse_args()
+    args = parser.parse_args()
 
     # The workflow name is derived from the package name
     workflow_name: str = __package__ or 'popgen_genotyping'
