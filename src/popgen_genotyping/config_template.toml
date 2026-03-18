@@ -1,0 +1,66 @@
+# this is a template for the config file
+# demonstrating some of the common options used in cpg-flow
+[workflow]
+
+# TODO(you): update this to reflect the workflow's name
+name = 'popgen_genotyping'
+
+# mandatory fields for cpg-flow, not populated by analysis-runner
+dataset = 'ourdna'
+input_cohorts = []
+sequencing_type = 'array'
+
+# used to make sure we don't repeat previously completed stages
+check_expected_outputs = true
+
+# the method to register outputs, can be missing - will not generate metamist analysis entries
+status_reporter = 'metamist'
+
+driver_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/cpg_flow:latest'
+bcftools_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/bcftools:1.23-1'
+plink_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/plink:1.9-20250819-PLINK-2.0-20260228-1'
+version = 1
+
+[popgen_genotyping.gtc_to_bcfs]
+cpu = 2
+memory = 'standard'
+storage = '50G'
+
+[popgen_genotyping.baf_regress]
+cpu = 1
+memory = 'standard'
+storage = '10G'
+
+[popgen_genotyping.cohort_bcf_to_plink]
+cpu = 8
+memory = 'highmem'
+storage = '50G'
+
+[popgen_genotyping.merge_cohort_plink]
+cpu = 4
+memory = 'highmem'
+storage = '100G'
+# The Metamist analysis ID of the previous multi-cohort aggregate
+# previous_analysis_id = 123456
+
+[popgen_genotyping.export_cohort_datasets]
+cpu = 2
+memory = 'standard'
+storage = '50G'
+
+[popgen_genotyping.plink2_qc]
+cpu = 2
+memory = 'standard'
+storage = '20G'
+
+[popgen_genotyping.qc_report]
+cpu = 2
+memory = 'standard'
+storage = '20G'
+
+[popgen_genotyping.references]
+fasta_ref_path = 'gs://cpg-common-main/references/hg38/v0/Homo_sapiens_assembly38.fasta'
+bpm_manifest_path = 'gs://...'
+egt_cluster_path = 'gs://...'
+# Optional: population allele frequency reference for BAFRegress
+# af_ref_path = 'gs://...'

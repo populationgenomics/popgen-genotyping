@@ -1,29 +1,57 @@
 name: Run Pytest
 on:
-  # Running on pull-requests and new pushes to main
-  pull_request:
-  push:
-    branches:
-      - main
+  workflow_call:
+    inputs:
+      image_tag:
+        description: 'Tag of the image to test'
+        type: string
+        default: 'latest'
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Tag of the image to test'
+        type: string
+        default: 'latest'
+
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
   test:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        shell: bash -l {0}
-
+    environment: 'development'
+    
     steps:
     - uses: actions/checkout@v4
 
-    - uses: actions/setup-python@v4
+    - id: 'google-cloud-auth'
+      name: 'Authenticate to Google Cloud'
+      uses: 'google-github-actions/auth@v2'
       with:
-        python-version: '3.10'
-        cache: 'pip'
-        cache-dependency-path: pyproject.toml
+        workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+        service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
 
-    - name: Install packages
-      run: pip install .[test]
+    - id: 'google-cloud-sdk-setup'
+      name: 'Set up Cloud SDK'
+      uses: google-github-actions/setup-gcloud@v2
 
-    - name: Run pre-commit
-      run: pytest test
+    - name: 'gcloud docker auth'
+      run: |
+        gcloud auth configure-docker australia-southeast1-docker.pkg.dev
+
+    - name: Run unit tests in container
+      run: |
+        # Use provided tag if available, otherwise fallback to ref_name-latest
+        IMAGE_TAG="${{ inputs.image_tag }}"
+        if [[ "$IMAGE_TAG" == "latest" ]]; then
+          IMAGE_TAG="${{ github.ref_name }}-latest"
+        fi
+        
+        # We assume the image is in the images-dev repository for testing
+        docker run --rm \
+          --shm-size=2gb \
+          -v ${{ github.workspace }}:/workspace \
+          -w /workspace \
+          australia-southeast1-docker.pkg.dev/cpg-common/images-dev/popgen_genotyping:$IMAGE_TAG \
+          pytest test

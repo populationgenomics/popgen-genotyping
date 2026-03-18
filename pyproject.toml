@@ -1,14 +1,13 @@
 [build-system]
-requires = ["setuptools"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling >= 1.26"]
+build-backend = "hatchling.build"
 
 [project]
-# TODO(you): update this to reflect the project's name & description
-name='workflow_name'
-description='Template workflow'
+name='popgen_genotyping'
+description='Genotyping microarray pipeline using CPG Flow'
 readme = "README.md"
 # currently cpg-flow is pinned to this version
-requires-python = ">=3.10,<3.11"
+requires-python = ">=3.10,<3.12"
 version='0.1.0'
 license={ "file" = "LICENSE" }
 classifiers=[
@@ -21,18 +20,22 @@ classifiers=[
     'Topic :: Scientific/Engineering :: Bio-Informatics',
 ]
 
+# TODO Audit these dependencies later, lifted from
+# Harper's temp_large_cohort_migration
 dependencies=[
-    'cpg-flow>=v0.1.2',
+    'cpg-flow>=v1.0.1',
+    'loguru',
+    'pandas>=2.0',
+    'pydantic>=2.12',
 ]
 
 [project.urls]
-# TODO(you): update this to reflect the project's official homepage
-Repository = "https://github.com/populationgenomics/workflow_name"
+Repository = "https://github.com/populationgenomics/popgen-genotyping"
 
 [project.optional-dependencies]
 # various requirements when running cpg-flow/analysis-runner
 cpg = [
-    'cpg-flow>=v0.1.2',
+    'cpg-flow>=v1.0.1',
 ]
 test = [
     'bump2version',
@@ -41,25 +44,17 @@ test = [
 ]
 
 [project.scripts]
-# home for any scripts which will be installed
-# e.g. this minimal "Hello, World!" script which can be run by alias when this package is installed
-# $ say_hello
-# >> Hello, World!
-# $ say_hello cpg-flow
-# >> Hello, cpg-flow!
-say_hello = 'workflow_name.scripts.hello_world:cli_main'
-
 # the workflow runner script - entrypoint for the pipeline
-run_workflow = 'workflow_name.run_workflow:cli_main'
+run_workflow = 'popgen_genotyping.run_workflow:cli_main'
 
-[tool.setuptools]
-package-dir = {"" = "src"}
+[tool.hatch.build.targets.wheel]
+packages = ["src/popgen_genotyping"]
 
-[options]
-include_package_data = true
+[tool.hatch.build.targets.wheel.sources]
+"src" = ""
 
-[options.package_data]
-'workflow_name'=  ['config_template.toml']
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.black]
 line-length = 120
@@ -96,8 +91,6 @@ fixable = ["A", "B", "C", "D", "E", "F", "G", "I", "N", "Q", "S", "T", "W", "ANN
 
 ignore = [
     "ANN001", # Missing type annotation for function argument
-    "ANN101", # Missing type annotation for self in method
-    "ANN102", # Missing type annotation for `cls` in classmethod
     "ANN201", # Missing return type annotation for public function
     "ANN401", # Dynamically typed expressions (typing.Any) are disallowed
     "ANN204", # Missing type annotation for special method `__init__`
@@ -113,6 +106,12 @@ ignore = [
     "N999", # invalid module name (not lower-case and potholes)
     "I001", # Import block is un-sorted or un-formatted (to remove soon)
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"test/**/*.py" = ["PLR2004"]
+
+[tool.ruff.lint.pydocstyle]
+convention = 'pep257'
 
 [tool.ruff.lint.isort]
 section-order = ["future", "standard-library", "third-party", "first-party", "local-folder"]
