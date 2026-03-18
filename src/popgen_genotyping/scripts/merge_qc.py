@@ -121,8 +121,7 @@ def process_kinship(kin0_path: str) -> dict[str, dict[str, str]]:
     required = {'IID1', 'IID2', 'KINSHIP', 'IBS0'}
     if not required.issubset(rows[0].keys()):
         print(
-            'Warning: Expected IID1, IID2, KINSHIP, and IBS0 columns '
-            "in .kin0 file but didn't find them.",
+            'Warning: Expected IID1, IID2, KINSHIP, and IBS0 columns in .kin0 file but column(s) not found.',
         )
         return {}
 

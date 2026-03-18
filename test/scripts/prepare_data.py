@@ -4,7 +4,7 @@ Data preparation for genotyping pipeline reproduction.
 
 import os
 import subprocess
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from scripts.testing_utils import (
     BCFTOOLS_IMAGE,
@@ -13,6 +13,9 @@ from scripts.testing_utils import (
     run_docker,
     to_container,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def generate_gtcs(samples: list[str], num_snps: int, base_seed: int = 42) -> list[str]:
