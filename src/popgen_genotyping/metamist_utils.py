@@ -162,7 +162,7 @@ def resolve_cohort_gtc_mapping(cohort: 'Cohort') -> dict[str, dict[str, str]]:
         ValueError: If no manifest is found for the cohort.
     """
     # 1. Query manifests for the project
-    all_manifests: list[dict[str, Any]] = query_genotyping_manifests(cohort.analysis_dataset.name)
+    all_manifests: list[dict[str, Any]] = query_genotyping_manifests(cohort.dataset.name)
 
     # 2. Find manifest with the cohort ID in its basename
     matching_manifests: list[dict[str, Any]] = [m for m in all_manifests if cohort.id in str(m.get('basename', ''))]
