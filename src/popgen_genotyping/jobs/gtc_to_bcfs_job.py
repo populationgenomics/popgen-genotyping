@@ -70,6 +70,13 @@ def run_gtc_to_bcfs(
     # Create reheader mapping file content
     mapping_content = '\n'.join([f'{old} {new}' for old, new in sample_mapping.items()])
 
+    # Index outputs
+    j.declare_resource_group(
+        heavy_bcf={'heavy_bcf': '{root}.bcf', 'heavy_bcf_index': '{root}_index.csi'},
+        light_bcf={'light_bcf': '{root}.bcf', 'light_bcf_index': '{root}_index.csi'},
+        metadata_tsv={'metadata_tsv': '{root}.tsv'},
+    )
+
     # Building the command
     j.command(
         f"""
@@ -103,9 +110,9 @@ EOF
     )
 
     b.write_output(j.heavy_bcf, output_heavy_bcf_path)
-    b.write_output(j.heavy_bcf_index, output_heavy_bcf_path + '.csi')
+    b.write_output(j.heavy_bcf_index, output_heavy_bcf_index_path)
     b.write_output(j.light_bcf, output_light_bcf_path)
-    b.write_output(j.light_bcf_index, output_light_bcf_path + '.csi')
+    b.write_output(j.light_bcf_index, output_light_bcf_index_path)
     b.write_output(j.metadata_tsv, output_metadata_path)
 
     return j
