@@ -319,7 +319,7 @@ class Plink2Qc(MultiCohortStage):
             'hwe': prefix / f'{output_base_name}.hwe',
             'het': prefix / f'{output_base_name}.het',
             'sexcheck': prefix / f'{output_base_name}.sexcheck',
-            'kin': prefix / f'{output_base_name}.kin',
+            'kin0': prefix / f'{output_base_name}.kin0',
         }
 
     def queue_jobs(self, multicohort: MultiCohort, inputs: StageInput) -> StageOutput:
