@@ -109,6 +109,6 @@ EOF
 
     b.write_output(j.heavy_bcf, str(output_heavy_bcf_path).replace('.bcf', ''))
     b.write_output(j.light_bcf, str(output_light_bcf_path).replace('.bcf', ''))
-    b.write_output(j.metadata_tsv.tsv, output_metadata_path)
+    b.write_output(j.metadata_tsv, output_metadata_path)
 
     return j
