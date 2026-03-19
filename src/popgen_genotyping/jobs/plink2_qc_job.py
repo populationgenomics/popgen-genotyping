@@ -66,7 +66,7 @@ def run_plink2_qc(
             'hwe': f'{{root}}/{output_base}.hwe',
             'het': f'{{root}}/{output_base}.het',
             'sexcheck': f'{{root}}/{output_base}.sexcheck',
-            'kin': f'{{root}}/{output_base}.kin0',
+            'kin0': f'{{root}}/{output_base}.kin0',
         },
     )
 
