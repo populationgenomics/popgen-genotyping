@@ -72,9 +72,9 @@ def run_gtc_to_bcfs(
 
     # Outputs
     j.declare_resource_group(
-        heavy_bcf={'heavy_bcf': '{root}.bcf', 'heavy_bcf_index': '{root}_index.csi'},
-        light_bcf={'light_bcf': '{root}.bcf', 'light_bcf_index': '{root}_index.csi'},
-        metadata_tsv={'metadata_tsv': '{root}.tsv'},
+        heavy_bcf={'bcf': '{root}.bcf', 'index': '{root}_index.csi'},
+        light_bcf={'bcf': '{root}.bcf', 'index': '{root}_index.csi'},
+        metadata_tsv={'tsv': '{root}.tsv'},
     )
 
     # Building the command
@@ -100,19 +100,19 @@ EOF
         bcftools norm -m -both --no-version -c x -f {fasta_file.base} | \\
         bcftools sort -T $BATCH_TMPDIR/bcftools-tmp | \\
         bcftools reheader -s reheader_map.txt | \\
-        bcftools view -O b -o {j.heavy_bcf} --write-index=csi
+        bcftools view -O b -o {j.heavy_bcf.bcf} --write-index=csi
 
-        bcftools annotate --no-version -x ^FORMAT/GT,FORMAT/GQ {j.heavy_bcf} \\
-        -O b -o {j.light_bcf} --write-index=csi
+        bcftools annotate --no-version -x ^FORMAT/GT,FORMAT/GQ {j.heavy_bcf.bcf} \\
+        -O b -o {j.light_bcf.bcf} --write-index=csi
 
-        mv metadata_raw.tsv {j.metadata_tsv}
+        mv metadata_raw.tsv {j.metadata_tsv.tsv}
         """
     )
 
-    b.write_output(j.heavy_bcf, output_heavy_bcf_path)
-    b.write_output(j.heavy_bcf_index, output_heavy_bcf_index_path)
-    b.write_output(j.light_bcf, output_light_bcf_path)
-    b.write_output(j.light_bcf_index, output_light_bcf_index_path)
-    b.write_output(j.metadata_tsv, output_metadata_path)
+    b.write_output(j.heavy_bcf.bcf, output_heavy_bcf_path)
+    b.write_output(j.heavy_bcf.index, output_heavy_bcf_index_path)
+    b.write_output(j.light_bcf.bcf, output_light_bcf_path)
+    b.write_output(j.light_bcf.index, output_light_bcf_index_path)
+    b.write_output(j.metadata_tsv.tsv, output_metadata_path)
 
     return j
