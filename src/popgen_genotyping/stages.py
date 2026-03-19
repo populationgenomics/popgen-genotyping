@@ -293,6 +293,7 @@ class ExportCohortDatasets(MultiCohortStage):
                 'fam': str(input_plink['fam']),
             },
             output_prefix=str(outputs['pgen']).replace('.pgen', ''),
+            bcf_output_path=str(outputs['bcf']),
             job_name='ExportCohortDatasets',
         )
 
