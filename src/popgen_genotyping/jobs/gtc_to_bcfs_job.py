@@ -70,8 +70,8 @@ def run_gtc_to_bcfs(
 
     # Outputs
     j.declare_resource_group(
-        heavy_bcf={'bcf': '{root}.bcf', 'index': '{root}_index.csi'},
-        light_bcf={'bcf': '{root}.bcf', 'index': '{root}_index.csi'},
+        heavy_bcf={'bcf': '{root}.bcf', 'index': '{root}.bcf.csi'},
+        light_bcf={'bcf': '{root}.bcf', 'index': '{root}.bcf.csi'},
         metadata_tsv={'tsv': '{root}.tsv'},
     )
 
