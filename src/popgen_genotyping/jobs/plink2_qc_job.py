@@ -58,7 +58,7 @@ def run_plink2_qc(
             'smiss': '{root}.smiss',
             'vmiss': '{root}.vmiss',
             'afreq': '{root}.afreq',
-            'hwe': '{root}.hwe',
+            'hardy': '{root}.hardy',
             'het': '{root}.het',
             'sexcheck': '{root}.sexcheck',
             'kin0': '{root}.kin0',
