@@ -84,26 +84,24 @@ class GtcToBcfs(CohortStage):
         return self.make_outputs(cohort, data=outputs, jobs=[j])
 
 
-@stage(required_stages=[GtcToBcfs])
+@stage(required_stages=[GtcToBcfs], analysis_type='array_bafregress')
 class BafRegress(CohortStage):
     """
     Estimate sample contamination for the entire cohort using BAFRegress.
     """
 
-    def expected_outputs(self, cohort: Cohort) -> dict[str, Path]:
+    def expected_outputs(self, cohort: Cohort) -> Path:
         """
         Define the expected BAFRegress output text file for the cohort.
         """
         prefix: Path = get_output_prefix(dataset=cohort.dataset, stage_name=self.name)
-        return {
-            'bafregress_txt': prefix / f'{cohort.id}.BAFRegress.txt',
-        }
+        return prefix / f'{cohort.id}.BAFRegress.txt'
 
     def queue_jobs(self, cohort: Cohort, inputs: StageInput) -> StageOutput:
         """
         Queue the cohort-level BAFRegress estimation job.
         """
-        outputs: dict[str, Path] = self.expected_outputs(cohort)
+        outputs: Path = self.expected_outputs(cohort)
 
         # Pull the cohort heavy BCF output from the previous stage
         heavy_bcf_path: Path = inputs.as_path(cohort, GtcToBcfs, 'heavy_bcf')
@@ -113,7 +111,7 @@ class BafRegress(CohortStage):
 
         j: BashJob = run_bafregress(
             bcf_path=str(heavy_bcf_path),
-            output_path=str(outputs['bafregress_txt']),
+            output_path=str(outputs),
             af_ref_path=af_ref_path,
             job_name=f'BafRegress_{cohort.name}',
         )
@@ -254,7 +252,7 @@ class MergeCohortPlink(MultiCohortStage):
         return self.make_outputs(multicohort, data=outputs, jobs=[j])
 
 
-@stage(required_stages=[MergeCohortPlink])
+@stage(required_stages=[MergeCohortPlink], analysis_type='array_aggregate_pgen')
 class ExportCohortDatasets(MultiCohortStage):
     """
     Export the merged cohort to PLINK2 format for long-term storage.
@@ -300,7 +298,7 @@ class ExportCohortDatasets(MultiCohortStage):
         return self.make_outputs(multicohort, data=outputs, jobs=[j])
 
 
-@stage(required_stages=[ExportCohortDatasets])
+@stage(required_stages=[ExportCohortDatasets], analysis_type='array_qc_raw')
 class Plink2Qc(MultiCohortStage):
     """
     Run PLINK2 QC on a cohort object's pgen/pvar/psam files.
@@ -347,41 +345,39 @@ class Plink2Qc(MultiCohortStage):
         return self.make_outputs(multicohort, data=outputs, jobs=[j])
 
 
-@stage(required_stages=[Plink2Qc, BafRegress])
+@stage(required_stages=[Plink2Qc, BafRegress], analysis_type='array_qc_report')
 class QcReport(MultiCohortStage):
     """
     Create the QC report for an input object.
     """
 
-    def expected_outputs(self, multicohort: MultiCohort) -> dict[str, Path]:
+    def expected_outputs(self, multicohort: MultiCohort) -> Path:
         """
         Define the expected QC report output file for the multi-cohort.
         """
         prefix: Path = get_output_prefix(dataset=multicohort.analysis_dataset, stage_name=self.name)
         datestamp: str = datetime.now(tz=timezone.utc).strftime('%Y%m%d')
-        return {
-            'qc_report_csv': prefix / f'{datestamp}_qc_report.csv',
-        }
+        return prefix / f'{datestamp}_qc_report.csv'
 
     def queue_jobs(self, multicohort: MultiCohort, inputs: StageInput) -> StageOutput:
         """
         Queue the QC report generation job for the multi-cohort.
         """
-        outputs: dict[str, Path] = self.expected_outputs(multicohort=multicohort)
+        outputs: Path = self.expected_outputs(multicohort=multicohort)
 
         # Get the plink2_qc_prefix from the Plink2Qc stage's 'smiss' output
         plink_qc_smiss_path: Path = inputs.as_path(target=multicohort, stage=Plink2Qc, key='smiss')
         plink_qc_prefix = str(plink_qc_smiss_path).removesuffix('.smiss')
 
         # Get all bafregress output paths from all cohorts
-        bafregress_outputs: dict[str, dict[str, Path]] = inputs.as_dict_by_target(stage=BafRegress)
-        bafregress_paths: list[str] = [str(baf_out['bafregress_txt']) for baf_out in bafregress_outputs.values()]
+        bafregress_outputs: dict[str, Path] = inputs.as_dict_by_target(stage=BafRegress)
+        bafregress_paths: list[str] = [str(baf_out) for baf_out in bafregress_outputs.values()]
 
         # Call the Hail Batch job function
         j: BashJob = run_qc_report(
             plink_qc_prefix=plink_qc_prefix,
             bafregress_paths=bafregress_paths,
-            output_path=str(outputs['qc_report_csv']),
+            output_path=str(outputs),
             job_name=f'QcReport_{multicohort.name}',
         )
 
