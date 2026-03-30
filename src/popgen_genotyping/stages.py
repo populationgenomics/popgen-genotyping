@@ -252,7 +252,7 @@ class MergeCohortPlink(MultiCohortStage):
         return self.make_outputs(multicohort, data=outputs, jobs=[j])
 
 
-@stage(required_stages=[MergeCohortPlink], analysis_type='array_aggregate_pgen')
+@stage(required_stages=[MergeCohortPlink], analysis_type='array_aggregate_pgen', analysis_keys=['pgen'])
 class ExportCohortDatasets(MultiCohortStage):
     """
     Export the merged cohort to PLINK2 format for long-term storage.
@@ -298,7 +298,7 @@ class ExportCohortDatasets(MultiCohortStage):
         return self.make_outputs(multicohort, data=outputs, jobs=[j])
 
 
-@stage(required_stages=[ExportCohortDatasets], analysis_type='array_qc_raw')
+@stage(required_stages=[ExportCohortDatasets], analysis_type='array_qc_raw', analysis_keys=['log'])
 class Plink2Qc(MultiCohortStage):
     """
     Run PLINK2 QC on a cohort object's pgen/pvar/psam files.
