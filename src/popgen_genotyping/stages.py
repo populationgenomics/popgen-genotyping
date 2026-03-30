@@ -370,7 +370,7 @@ class QcReport(MultiCohortStage):
         plink_qc_prefix = str(plink_qc_smiss_path).removesuffix('.smiss')
 
         # Get all bafregress output paths from all cohorts
-        bafregress_outputs: dict[str, Path] = inputs.as_path_dict_by_target(stage=BafRegress, target=multicohort)
+        bafregress_outputs: dict[str, Path] = inputs.as_path_by_target(stage=BafRegress)
         bafregress_paths: list[str] = [str(baf_out) for baf_out in bafregress_outputs.values()]
 
         # Call the Hail Batch job function
