@@ -252,11 +252,10 @@ def query_previous_aggregate(analysis_id: int) -> tuple[dict[str, Any], list[str
     analysis: dict[str, Any] = query_result['analyses'][0]
     # Outputs only contains the PGEN path, we need to reconstruct PSAM and PVAR paths based on naming convention
     outputs: dict[str, Any] = {'pgen': analysis.get('outputs', {}).get('path', {})}
-    if outputs['pgen']:
-        outputs.update({'psam': outputs['pgen'].replace('.pgen', '.psam')})
-        outputs.update({'pvar': outputs['pgen'].replace('.pgen', '.pvar')})
-    else:
+    if not outputs['pgen'] or not outputs['pgen'].endswith('.pgen'):
         raise ValueError(f'Analysis with ID {analysis_id} does not have a valid PGEN output path')
+    outputs.update({'psam': outputs['pgen'].replace('.pgen', '.psam')})
+    outputs.update({'pvar': outputs['pgen'].replace('.pgen', '.pvar')})
     project: dict[str, Any] = analysis.get('project', {})
     active_sgs: list[str] = [sg['id'] for sg in project.get('sequencingGroups', [])]
 
