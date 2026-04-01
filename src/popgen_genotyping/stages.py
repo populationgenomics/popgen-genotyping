@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from cpg_flow.targets import Cohort, MultiCohort
     from cpg_utils import Path
     from hailtop.batch.job import BashJob
+    from hailtop.batch.resource import ResourceGroup
 
 
 @stage
@@ -207,7 +208,7 @@ class MergeCohortPlink(MultiCohortStage):
             ['popgen_genotyping', 'merge_cohort_plink', 'previous_analysis_id'], default=None
         )
 
-        previous_aggregate_plink1_paths: dict[str, str] | None = None
+        previous_aggregate_plink1_resource: ResourceGroup | None = None
         samples_to_remove: list[str] | None = None
         merge_job_dependencies: list[BashJob] = []
 
@@ -230,18 +231,14 @@ class MergeCohortPlink(MultiCohortStage):
             )
             merge_job_dependencies.append(conversion_job)
 
-            # The converted PLINK1.9 files become the previous aggregate for the merge job
-            previous_aggregate_plink1_paths = {
-                'bed': str(converted_plink1_resource.bed),
-                'bim': str(converted_plink1_resource.bim),
-                'fam': str(converted_plink1_resource.fam),
-            }
+            # The converted PLINK1.9 resource group becomes the previous aggregate for the merge job
+            previous_aggregate_plink1_resource = converted_plink1_resource
 
         # 3. Call merge job
         j: BashJob = run_merge_plink(
             cohort_plink_paths=cohort_plink_paths,
             output_prefix=str(outputs['bed']).replace('.bed', ''),
-            previous_aggregate_paths=previous_aggregate_plink1_paths,
+            previous_aggregate_resource=previous_aggregate_plink1_resource,
             samples_to_remove=samples_to_remove,
             job_name='MergeCohortPlink',
         )

@@ -14,12 +14,13 @@ from popgen_genotyping.utils import register_job
 
 if TYPE_CHECKING:
     from hailtop.batch.job import BashJob
+    from hailtop.batch.resource import ResourceGroup
 
 
 def run_merge_plink(
     cohort_plink_paths: list[dict[str, str]],
     output_prefix: str,
-    previous_aggregate_paths: dict[str, str] | None = None,
+    previous_aggregate_resource: ResourceGroup | None = None,
     samples_to_remove: list[str] | None = None,
     job_name: str = 'merge_cohort_plink',
 ) -> BashJob:
@@ -29,7 +30,7 @@ def run_merge_plink(
     Args:
         cohort_plink_paths (list[dict[str, str]]): List of dicts, each with 'bed', 'bim', 'fam' cloud paths.
         output_prefix (str): Cloud prefix for the final merged PLINK 1.9 files.
-        previous_aggregate_paths (dict[str, str], optional): Paths for the previous rolling aggregate.
+        previous_aggregate_resource (ResourceGroup, optional): Resource group for the previous rolling aggregate.
         samples_to_remove (list[str], optional): List of SG IDs to remove from the previous aggregate.
         job_name (str): Name for the Hail Batch job.
 
@@ -49,12 +50,8 @@ def run_merge_plink(
     staged_prefixes = []
 
     # 1. Stage the previous aggregate and filter if necessary
-    if previous_aggregate_paths:
-        prev_resource = b.read_input_group(
-            bed=previous_aggregate_paths['bed'],
-            bim=previous_aggregate_paths['bim'],
-            fam=previous_aggregate_paths['fam'],
-        )
+    if previous_aggregate_resource:
+        prev_resource = previous_aggregate_resource
 
         if samples_to_remove:
             # We must filter the previous aggregate before merging
