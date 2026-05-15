@@ -30,7 +30,7 @@ def main() -> None:
 
     # 1. Data Preparation
     # We generate synthetic GTCs for all samples.
-    gtc_paths_int: list[str] = generate_gtcs(samples, args.snps)
+    gtc_paths_int, _sex_mapping = generate_gtcs(samples, args.snps)
 
     # 2. Stage: GtcToBcfs
     # We need the heavy BCF for BAFRegress.
