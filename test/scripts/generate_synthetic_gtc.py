@@ -3,6 +3,7 @@ Generate a deterministic synthetic GTC file for testing.
 """
 
 import argparse
+import gzip
 import random
 import struct
 from pathlib import Path
@@ -28,6 +29,14 @@ TAG_GENCALL_SCORES: int = 1004
 TAG_B_ALLELE_FREQS: int = 1012
 TAG_NUM_SNPS_INT: int = 1013
 
+# BPM chromosome strings that imply hemizygous calls for a given sex.
+# - 'X' is the non-PAR chrX block (Illumina marks PAR as 'XY' separately).
+# - 'Y' is the non-PAR chrY block.
+# - 'MT' is mitochondrial (effectively haploid for both sexes).
+HEMIZYGOUS_MALE_CHROMS: frozenset[str] = frozenset({'X', 'Y', 'MT'})
+HEMIZYGOUS_FEMALE_CHROMS: frozenset[str] = frozenset({'MT'})
+FEMALE_NULL_CHROMS: frozenset[str] = frozenset({'Y'})  # females have no chrY signal
+
 
 def leb128_encode(n: int) -> bytes:
     """
@@ -49,12 +58,34 @@ def leb128_encode(n: int) -> bytes:
         out.append(byte | 0x80)
 
 
+def load_bpm_chroms(cache_path: Path, limit: int | None = None) -> list[str]:
+    """
+    Load the BPM locus-index to chromosome mapping from the gzipped cache.
+
+    Args:
+        cache_path (Path): Path to test/data/bpm_chrom.txt.gz.
+        limit (int | None): If set, return only the first `limit` chromosomes.
+
+    Returns:
+        list[str]: Chromosome strings indexed by (BPM_index - 1).
+    """
+    chroms: list[str] = []
+    with gzip.open(cache_path, 'rt', encoding='utf-8') as f:
+        for i, line in enumerate(f):
+            if limit is not None and i >= limit:
+                break
+            chroms.append(line.strip())
+    return chroms
+
+
 def generate_gtc(  # noqa: PLR0915
     output_path: str | Path,
     num_snps: int,
     sample_name: str,
     contamination: float = DEFAULT_CONTAMINATION,
     sample_seed: int = DEFAULT_SEED,
+    sex: str = 'M',
+    chroms: list[str] | None = None,
 ) -> list[float]:
     """
     Generate a realistic deterministic synthetic GTC for a given number of loci.
@@ -65,11 +96,24 @@ def generate_gtc(  # noqa: PLR0915
         sample_name (str): Name of the sample to embed in the GTC.
         contamination (float): Simulated contamination level. Defaults to 0.05.
         sample_seed (int): Random seed for sample-specific genotypes. Defaults to 42.
+        sex (str): 'M' or 'F'. Drives ploidy of chrX/chrY/MT calls. Defaults to 'M'.
+        chroms (list[str] | None): BPM chromosomes for each locus (length >= num_snps).
+            If None, all loci are treated as autosomes (legacy behaviour).
 
     Returns:
         list[float]: The generated population allele frequencies for the sites.
     """
-    print(f'Generating GTC: {sample_name} | Contamination: {contamination * 100}% | Seed: {sample_seed}')
+    print(f'Generating GTC: {sample_name} | Sex: {sex} | Contamination: {contamination * 100}% | Seed: {sample_seed}')
+
+    if chroms is not None and len(chroms) < num_snps:
+        raise ValueError(
+            f'chroms length {len(chroms)} is shorter than num_snps {num_snps}; '
+            f'regenerate the BPM chrom cache or reduce --num',
+        )
+
+    sex = sex.upper()
+    if sex not in {'M', 'F'}:
+        raise ValueError(f"sex must be 'M' or 'F', got {sex!r}")
 
     # 1. Simulate population AFs (Consistent across cohort)
     af_rng: random.Random = random.Random(AF_SEED)  # noqa: S311
@@ -78,9 +122,24 @@ def generate_gtc(  # noqa: PLR0915
     # 2. Simulate sample genotypes (Unique per sample)
     sample_rng: random.Random = random.Random(sample_seed)  # noqa: S311
 
+    hemi_chroms: frozenset[str] = HEMIZYGOUS_MALE_CHROMS if sex == 'M' else HEMIZYGOUS_FEMALE_CHROMS
+
     # Genotypes: 1=AA, 2=AB, 3=BB, 0=NC
     gts: list[int] = []
-    for pop_af in pop_afs:
+    for i, pop_af in enumerate(pop_afs):
+        chrom: str | None = chroms[i] if chroms is not None else None
+
+        if chrom in FEMALE_NULL_CHROMS and sex == 'F':
+            # Females have no chrY signal — emit no-call.
+            gts.append(0)
+            continue
+
+        if chrom in hemi_chroms:
+            # Hemizygous: draw one allele only, never AB.
+            gts.append(sample_rng.choices([1, 3], weights=[1 - pop_af, pop_af], k=1)[0])
+            continue
+
+        # Diploid HWE draw (autosomes, PAR, female chrX).
         p_aa: float = (1 - pop_af) ** 2
         p_ab: float = 2 * pop_af * (1 - pop_af)
         p_bb: float = pop_af**2
@@ -93,13 +152,18 @@ def generate_gtc(  # noqa: PLR0915
 
     for i, gt in enumerate(gts):
         af: float = pop_afs[i]
-        if gt == 1:  # AA
+        if gt == 0:
+            # No-call → BAF undefined; use a neutral 0.5 sentinel so the
+            # downstream BCF still has a value.
+            baf_list.append(0.5)
+            continue
+        if gt == 1:  # AA (or hemizygous A)
             mu = (contamination * af) + drift
             baf_val = sample_rng.gauss(mu, sigma)
-        elif gt == 3:
+        elif gt == 3:  # BB (or hemizygous B)
             mu = 1.0 - (contamination * (1.0 - af)) + drift
             baf_val = sample_rng.gauss(mu, sigma)
-        else:  # AB
+        else:  # AB (diploid het only — hemizygous draws never produce this)
             baf_val = sample_rng.gauss(0.5, 0.025)
 
         if sample_rng.random() < OUTLIER_PERCENTAGE:
@@ -132,8 +196,10 @@ def generate_gtc(  # noqa: PLR0915
             base_calls_list.append(b'AA')
         elif g == 2:
             base_calls_list.append(b'AB')
-        else:
+        elif g == 3:
             base_calls_list.append(b'BB')
+        else:
+            base_calls_list.append(b'NN')
     base_calls_data: bytes = make_array_block(b''.join(base_calls_list))
 
     # 5. Normalization and Metadata
@@ -194,6 +260,9 @@ def main() -> None:
     """
     Main entry point for GTC generation.
     """
+    repo_root: Path = Path(__file__).resolve().parents[2]
+    default_cache: Path = repo_root / 'test' / 'data' / 'bpm_chrom.txt.gz'
+
     parser = argparse.ArgumentParser(description='Generate synthetic GTC')
     parser.add_argument('output', type=str, help='Output GTC path')
     parser.add_argument('--num', type=int, default=DEFAULT_SNP_COUNT, help='Number of SNPs')
@@ -201,14 +270,30 @@ def main() -> None:
     parser.add_argument('--seed', type=int, default=DEFAULT_SEED, help='Random seed')
     parser.add_argument('--contam', type=float, default=DEFAULT_CONTAMINATION, help='Contamination level')
     parser.add_argument('--af-out', type=str, default='pop_ref.vcf', help='Output AF reference path')
+    parser.add_argument('--sex', type=str, default='M', choices=['M', 'F'], help="Sample sex ('M' or 'F')")
+    parser.add_argument(
+        '--bpm-chrom-cache',
+        type=Path,
+        default=default_cache,
+        help='Path to the gzipped BPM chrom cache (line N = chrom of BPM index N)',
+    )
 
     args: argparse.Namespace = parser.parse_args()
+
+    chroms: list[str] | None = None
+    if args.bpm_chrom_cache.exists():
+        chroms = load_bpm_chroms(args.bpm_chrom_cache, limit=args.num)
+    else:
+        print(f'BPM chrom cache not found at {args.bpm_chrom_cache}; treating all loci as autosomes')
+
     pop_afs: list[float] = generate_gtc(
         args.output,
         args.num,
         Path(args.output).stem,
         contamination=args.contam,
         sample_seed=args.seed,
+        sex=args.sex,
+        chroms=chroms,
     )
 
     write_af_vcf(args.af_out, pop_afs)

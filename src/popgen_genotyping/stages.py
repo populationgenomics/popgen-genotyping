@@ -14,6 +14,7 @@ from popgen_genotyping.jobs.baf_regress_job import run_bafregress
 from popgen_genotyping.jobs.cohort_bcf_to_plink_job import run_cohort_bcf_to_plink
 from popgen_genotyping.jobs.export_cohort_datasets_job import run_export_cohort_datasets
 from popgen_genotyping.jobs.gtc_to_bcfs_job import run_gtc_to_bcfs
+from popgen_genotyping.jobs.king_ibdseg_job import run_king_ibdseg
 from popgen_genotyping.jobs.merge_cohort_plink_job import run_merge_plink
 from popgen_genotyping.jobs.plink2_qc_job import run_plink2_qc
 from popgen_genotyping.jobs.plink2_to_plink1_job import run_plink2_to_plink1
@@ -315,7 +316,6 @@ class Plink2Qc(MultiCohortStage):
             'hwe': prefix / f'{output_base_name}.hwe',
             'het': prefix / f'{output_base_name}.het',
             'sexcheck': prefix / f'{output_base_name}.sexcheck',
-            'kin0': prefix / f'{output_base_name}.kin0',
             'log': prefix / f'{output_base_name}.log',
         }
 
@@ -342,7 +342,60 @@ class Plink2Qc(MultiCohortStage):
         return self.make_outputs(multicohort, data=outputs, jobs=[j])
 
 
-@stage(required_stages=[Plink2Qc, BafRegress], analysis_type='array_qc_report')
+@stage(
+    required_stages=[MergeCohortPlink],
+    analysis_type='array_relatedness_ibdseg',
+    analysis_keys=['seg', 'seg_x'],
+)
+class KingIbdseg(MultiCohortStage):
+    """
+    Infer pairwise IBD segments across the merged cohort with KING `--ibdseg`.
+    """
+
+    def expected_outputs(self, multicohort: MultiCohort) -> dict[str, Path]:
+        """
+        Define the expected KING `--ibdseg` outputs for the multi-cohort.
+
+        KING 2.3.2 produces an X-chromosome companion (`{prefix}X.seg` /
+        `{prefix}X.segments.gz`, no dot before the `X`) whenever the merged
+        PLINK fileset has chrX SNPs. The job backfills header-only placeholders
+        when the input has no chrX, so these outputs are always materialised.
+        """
+        prefix: Path = get_output_prefix(dataset=multicohort.analysis_dataset, stage_name=self.name)
+        datestamp: str = datetime.now(tz=timezone.utc).strftime('%Y%m%d')
+        output_base_name = f'{datestamp}_king'
+        return {
+            'seg': prefix / f'{output_base_name}.seg',
+            'segments': prefix / f'{output_base_name}.segments.gz',
+            'seg_x': prefix / f'{output_base_name}X.seg',
+            'segments_x': prefix / f'{output_base_name}X.segments.gz',
+            'log': prefix / f'{output_base_name}.log',
+        }
+
+    def queue_jobs(self, multicohort: MultiCohort, inputs: StageInput) -> StageOutput:
+        """
+        Queue the KING `--ibdseg` job against the merged PLINK 1.9 dataset.
+        """
+        outputs: dict[str, Path] = self.expected_outputs(multicohort=multicohort)
+
+        merged_plink: dict[str, Path] = inputs.as_dict(target=multicohort, stage=MergeCohortPlink)
+
+        j: BashJob = run_king_ibdseg(
+            bed_path=str(merged_plink['bed']),
+            bim_path=str(merged_plink['bim']),
+            fam_path=str(merged_plink['fam']),
+            output_seg_path=str(outputs['seg']),
+            output_segments_path=str(outputs['segments']),
+            output_seg_x_path=str(outputs['seg_x']),
+            output_segments_x_path=str(outputs['segments_x']),
+            output_log_path=str(outputs['log']),
+            job_name=f'KingIbdseg_{multicohort.name}',
+        )
+
+        return self.make_outputs(multicohort, data=outputs, jobs=[j])
+
+
+@stage(required_stages=[Plink2Qc, KingIbdseg, BafRegress], analysis_type='array_qc_report')
 class QcReport(MultiCohortStage):
     """
     Create the QC report for an input object.
@@ -366,6 +419,9 @@ class QcReport(MultiCohortStage):
         plink_qc_smiss_path: Path = inputs.as_path(target=multicohort, stage=Plink2Qc, key='smiss')
         plink_qc_prefix = str(plink_qc_smiss_path).removesuffix('.smiss')
 
+        # Get the KING --ibdseg pairwise segment summary
+        seg_path: Path = inputs.as_path(target=multicohort, stage=KingIbdseg, key='seg')
+
         # Get all bafregress output paths from all cohorts
         bafregress_outputs: dict[str, Path] = inputs.as_path_by_target(stage=BafRegress)
         bafregress_paths: list[str] = [str(baf_out) for baf_out in bafregress_outputs.values()]
@@ -373,6 +429,7 @@ class QcReport(MultiCohortStage):
         # Call the Hail Batch job function
         j: BashJob = run_qc_report(
             plink_qc_prefix=plink_qc_prefix,
+            seg_path=str(seg_path),
             bafregress_paths=bafregress_paths,
             output_path=str(outputs),
             job_name=f'QcReport_{multicohort.name}',
