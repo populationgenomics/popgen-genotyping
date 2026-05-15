@@ -16,7 +16,9 @@ The pipeline is composed of several sequential stages, orchestrated by `cpg-flow
 - **CohortBcfToPlink**: Converts the Light BCF into PLINK 1.9 binary format (`.bed`, `.bim`, `.fam`), preparing it for merging.
 - **MergeCohortPlink**: Merges PLINK files from multiple cohorts into a single, unified dataset. This stage also supports a "rolling aggregate" workflow, where new samples can be added to a previously generated aggregate.
 - **ExportCohortDatasets**: Converts the merged PLINK 1.9 dataset into PLINK2 (`.pgen`) format for long-term storage and analysis, and `.bcf` format in temporary storage for ancestry analysis.
-- **Plink2Qc**: Performs a standard suite of quality control checks on the final PLINK2 dataset, including sample/variant missingness, allele frequency, HWE, heterozygosity, and kinship.
+- **Plink2Qc**: Performs a standard suite of quality control checks on the final PLINK2 dataset, including sample/variant missingness, allele frequency, HWE, heterozygosity and X/Y sex check.
+- **KingIbdseg**: Runs KING `--ibdseg` against the merged PLINK 1.9 dataset to call pairwise IBD segments. Emits autosomal `.seg` / `.segments.gz` and (when chrX SNPs are present) X-chr companions `X.seg` / `X.segments.gz`, plus the captured KING log. Header-only placeholders are backfilled if any file is absent.
+- **QcReport**: Combines the `Plink2Qc` outputs, the `KingIbdseg` pairwise summary and per-cohort `BafRegress` results into a single per-sample QC CSV.
 
 ## Prerequisites
 Before running the pipeline, ensure you have the following tools installed and configured:
@@ -33,7 +35,7 @@ The pipeline is configured using a TOML file (e.g., `config.toml`). A template i
     - `input_cohorts`: A list of cohort IDs to include in the run.
     - `sequencing_type`: Must be set to `array`.
     - `driver_image`: The Docker image for the main `cpg-flow` driver.
-    - `bcftools_image`, `plink_image`: Docker images for the respective tools.
+    - `bcftools_image`, `plink_image`, `king_image`: Docker images for the respective tools.
 - `[popgen_genotyping.references]`:
     - `fasta_ref_path`: Path to the human genome FASTA reference.
     - `bpm_manifest_path`: Path to the Illumina BPM manifest file.

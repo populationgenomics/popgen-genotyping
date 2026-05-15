@@ -18,7 +18,26 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def generate_gtcs(samples: list[str], num_snps: int, base_seed: int = 42) -> list[str]:
+def assign_sexes(samples: list[str]) -> dict[str, str]:
+    """
+    Assign deterministic alternating sexes (M/F) to a sample list.
+
+    Args:
+        samples (list[str]): Sample names in cohort order.
+
+    Returns:
+        dict[str, str]: Mapping of sample name to 'M' or 'F'. Even-indexed
+        samples (0, 2, 4, ...) get 'M'; odd-indexed get 'F'. With an even
+        sample count this gives a 50/50 split.
+    """
+    return {s: ('M' if i % 2 == 0 else 'F') for i, s in enumerate(samples)}
+
+
+def generate_gtcs(
+    samples: list[str],
+    num_snps: int,
+    base_seed: int = 42,
+) -> tuple[list[str], dict[str, str]]:
     """
     Generate synthetic GTC files for a list of samples.
 
@@ -28,9 +47,12 @@ def generate_gtcs(samples: list[str], num_snps: int, base_seed: int = 42) -> lis
         base_seed (int): Base random seed. Each sample i gets base_seed + i.
 
     Returns:
-        list[str]: Internal container paths to the generated GTCs.
+        tuple[list[str], dict[str, str]]: (container paths to GTCs in sample
+            order, sample-name → 'M'/'F' mapping).
     """
     print(f'>>> Generating synthetic GTC files ({len(samples)} samples, base seed: {base_seed})...')
+    sex_mapping: dict[str, str] = assign_sexes(samples)
+
     gtc_paths: list[str] = []
     for i, sample in enumerate(samples):
         gtc_path: Path = DATA_DIR / f'{sample}.gtc'
@@ -48,10 +70,12 @@ def generate_gtcs(samples: list[str], num_snps: int, base_seed: int = 42) -> lis
             str(base_seed + i),
             '--contam',
             '0.05',
+            '--sex',
+            sex_mapping[sample],
         ]
         subprocess.run(cmd, check=True, capture_output=True)  # noqa: S603
         gtc_paths.append(to_container(gtc_path))
-    return gtc_paths
+    return gtc_paths, sex_mapping
 
 
 def prepare_af_reference(num_snps: int) -> str:

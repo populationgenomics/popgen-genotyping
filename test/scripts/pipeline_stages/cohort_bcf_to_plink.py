@@ -11,14 +11,23 @@ from scripts.testing_utils import (
     to_container,
 )
 
+_SEX_CODE_BY_LABEL: dict[str, str] = {'M': '1', 'F': '2'}
 
-def run_cohort_bcf_to_plink(samples: list[str], light_bcf_host: Path) -> Path:
+
+def run_cohort_bcf_to_plink(
+    samples: list[str],
+    light_bcf_host: Path,
+    sex_mapping: dict[str, str],
+) -> Path:
     """
     Run the CohortBcfToPlink stage in Docker.
 
     Args:
         samples (list[str]): List of sample names.
         light_bcf_host (Path): Host path to the light BCF.
+        sex_mapping (dict[str, str]): Sample name → 'M'/'F' mapping. Drives the
+            PLINK 1/2 sex code on the .fam (so `--split-par hg38` + `--update-sex`
+            correctly haploidises male non-PAR X calls).
 
     Returns:
         Path: Host path prefix for the generated PLINK 1.9 files.
@@ -31,7 +40,8 @@ def run_cohort_bcf_to_plink(samples: list[str], light_bcf_host: Path) -> Path:
     sex_mapping_file: Path = DATA_DIR / 'sex_mapping.txt'
     with open(sex_mapping_file, 'w') as f:
         for s in samples:
-            f.write(f'0 {s} 1\n')
+            code: str = _SEX_CODE_BY_LABEL[sex_mapping[s]]
+            f.write(f'0 {s} {code}\n')
     sex_int: str = to_container(sex_mapping_file)
 
     plink1_cmd: str = (

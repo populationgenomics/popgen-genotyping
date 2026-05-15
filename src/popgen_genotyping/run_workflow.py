@@ -12,6 +12,7 @@ from popgen_genotyping.stages import (
     CohortBcfToPlink,
     ExportCohortDatasets,
     GtcToBcfs,
+    KingIbdseg,
     MergeCohortPlink,
     Plink2Qc,
     QcReport,
@@ -28,7 +29,16 @@ def cli_main() -> None:
 
     # The workflow name is derived from the package name
     workflow_name: str = __package__ or 'popgen_genotyping'
-    stages: list = [GtcToBcfs, BafRegress, CohortBcfToPlink, MergeCohortPlink, ExportCohortDatasets, Plink2Qc, QcReport]
+    stages: list = [
+        GtcToBcfs,
+        BafRegress,
+        CohortBcfToPlink,
+        MergeCohortPlink,
+        ExportCohortDatasets,
+        Plink2Qc,
+        KingIbdseg,
+        QcReport,
+    ]
 
     run_workflow(name=workflow_name, stages=stages, dry_run=args.dry_run)
 

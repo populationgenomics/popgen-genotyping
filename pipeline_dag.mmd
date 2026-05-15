@@ -13,7 +13,11 @@ graph TD
     BtoP --> MCP[MergeCohortPlink<br/><i>Merge Samples + Rolling Aggregate</i>]:::multicohort
     P2P1[Plink2ToPlink1<br/><i>PLINK2 to PLINK1.9 if needed</i>]:::conditional --> MCP
     MCP --> ECD[ExportCohortDatasets<br/><i>Export to PLINK2/BCF</i>]:::multicohort
+    MCP --> KING[KingIbdseg<br/><i>KING --ibdseg Relatedness</i>]:::multicohort
     ECD --> QC[Plink2Qc<br/><i>PLINK2 QC Suite</i>]:::multicohort
+    QC --> QR[QcReport<br/><i>Combined QC CSV</i>]:::multicohort
+    KING --> QR
+    BAF --> QR
 
     %% Component styling
     classDef cohort fill:#d1ecf1,stroke:#007bff,stroke-width:2px;
@@ -23,5 +27,5 @@ graph TD
 
     %% Explicit classes
     class GtoB,BAF,BtoP cohort;
-    class MCP,ECD,QC multicohort;
+    class MCP,ECD,QC,KING,QR multicohort;
     class P2P1 conditional;
