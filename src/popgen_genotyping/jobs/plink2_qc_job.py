@@ -61,6 +61,7 @@ def run_plink2_qc(
             'hardy': '{root}.hardy',
             'het': '{root}.het',
             'sexcheck': '{root}.sexcheck',
+            'kin0': '{root}.kin0',
             'log': '{root}.log',
         },
     )
@@ -79,6 +80,7 @@ def run_plink2_qc(
             --hardy \\
             --het \\
             --check-sex {check_sex_args} \\
+            --make-king-table \\
             --out {j.plink_qc_outputs}
         """
     )

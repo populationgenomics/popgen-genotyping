@@ -9,10 +9,10 @@ import pytest
 
 from popgen_genotyping.scripts.merge_qc import (
     DEGREE_COLS,
-    INFTYPE_TO_DEGREE,
+    get_degree,
     main,
     process_bafregress,
-    process_ibdseg,
+    process_kinship,
     read_qc_file,
 )
 
@@ -56,114 +56,93 @@ class TestReadQcFile:
         assert list(df.columns) == ['IID', 'METRIC']
 
 
-# -- INFTYPE_TO_DEGREE ---------------------------------------------------------
+# -- get_degree ----------------------------------------------------------------
 
 
-class TestInfTypeMap:
-    """Sanity checks on the InfType → degree-column map."""
+class TestGetDegree:
+    """Tests for get_degree."""
 
-    def test_known_inftypes(self) -> None:
-        """All canonical KING InfType labels map to a degree column."""
-        assert INFTYPE_TO_DEGREE['Dup/MZ'] == 'RELATED_MZ'
-        assert INFTYPE_TO_DEGREE['PO'] == 'RELATED_1ST'
-        assert INFTYPE_TO_DEGREE['FS'] == 'RELATED_1ST'
-        assert INFTYPE_TO_DEGREE['2nd'] == 'RELATED_2ND'
-        assert INFTYPE_TO_DEGREE['3rd'] == 'RELATED_3RD'
+    def test_mz(self) -> None:
+        """Kinship >= 0.354 is MZ."""
+        assert get_degree(0.5) == 'RELATED_MZ'
+        assert get_degree(0.354) == 'RELATED_MZ'
 
-    def test_map_only_covers_known(self) -> None:
-        """The map exposes exactly the inference types the report tracks."""
-        assert set(INFTYPE_TO_DEGREE.values()) == set(DEGREE_COLS)
+    def test_first_degree(self) -> None:
+        """Kinship >= 0.177 and < 0.354 is 1st degree."""
+        assert get_degree(0.25) == 'RELATED_1ST'
+        assert get_degree(0.177) == 'RELATED_1ST'
+
+    def test_second_degree(self) -> None:
+        """Kinship >= 0.0884 and < 0.177 is 2nd degree."""
+        assert get_degree(0.125) == 'RELATED_2ND'
+        assert get_degree(0.0884) == 'RELATED_2ND'
+
+    def test_third_degree(self) -> None:
+        """Kinship >= 0.0442 and < 0.0884 is 3rd degree."""
+        assert get_degree(0.06) == 'RELATED_3RD'
+        assert get_degree(0.0442) == 'RELATED_3RD'
+
+    def test_below_threshold(self) -> None:
+        """Kinship below 0.0442 returns None."""
+        assert get_degree(0.01) is None
 
 
-# -- process_ibdseg ------------------------------------------------------------
+# -- process_kinship -----------------------------------------------------------
 
 
-def _seg_header() -> str:
-    """Header line for a KING --ibdseg .seg file."""
-    return 'FID1\tID1\tFID2\tID2\tIBD1Seg\tIBD2Seg\tPropIBD\tInfType'
+class TestProcessKinship:
+    """Tests for process_kinship."""
 
-
-class TestProcessIbdseg:
-    """Tests for process_ibdseg."""
-
-    def test_basic_ibdseg(self, tmp_dir: Path) -> None:
-        """Process a .seg file with one MZ, one PO and one 2nd-degree pair."""
+    def test_basic_kinship(self, tmp_dir: Path) -> None:
+        """Process a .kin0 file with one related pair."""
         path = _write(
-            tmp_dir / 'test.seg',
-            _seg_header() + '\n'
-            # Dup/MZ: full identity
-            'F1\tS1\tF2\tS2\t0.0\t1.0\t1.0\tDup/MZ\n'
-            # PO: ~half IBD1, no IBD2
-            'F3\tS3\tF4\tS4\t1.0\t0.0\t0.5\tPO\n'
-            # 2nd degree
-            'F5\tS5\tF6\tS6\t0.5\t0.0\t0.25\t2nd\n',
+            tmp_dir / 'test.kin0',
+            '#IID1\tIID2\tKINSHIP\tIBS0\nS1\tS2\t0.25\t0.01\n',
         )
-        result = process_ibdseg(path)
+        result = process_kinship(path)
         assert isinstance(result, pd.DataFrame)
         assert set(DEGREE_COLS).issubset(result.columns)
 
-        # S1 should carry the MZ payload referencing S2.
         s1_row = result[result['IID'] == 'S1'].iloc[0]
-        assert 'S2:0.0:0.0:1.0:1.0' in s1_row['RELATED_MZ']
+        assert 'S2:0.25:0.01' in s1_row['RELATED_1ST']
 
-        # S2 mirrors S1.
         s2_row = result[result['IID'] == 'S2'].iloc[0]
-        assert 'S1:0.0:0.0:1.0:1.0' in s2_row['RELATED_MZ']
+        assert 'S1:0.25:0.01' in s2_row['RELATED_1ST']
 
-        # PO pair lands in 1st-degree column with IBD0 ≈ 0.
-        s3_row = result[result['IID'] == 'S3'].iloc[0]
-        assert 'S4:0.0:1.0:0.0:0.5' in s3_row['RELATED_1ST']
-
-        # 2nd-degree pair lands in 2nd column with IBD0 = 0.5.
-        s5_row = result[result['IID'] == 'S5'].iloc[0]
-        assert 'S6:0.5:0.5:0.0:0.25' in s5_row['RELATED_2ND']
-
-    def test_unknown_inftype_excluded(self, tmp_dir: Path) -> None:
-        """Pairs with unmapped InfType (e.g. '4th', 'UN') are dropped."""
+    def test_filters_below_threshold(self, tmp_dir: Path) -> None:
+        """Pairs below 3rd degree threshold are excluded."""
         path = _write(
-            tmp_dir / 'unmapped.seg',
-            _seg_header() + '\nF1\tS1\tF2\tS2\t0.1\t0.0\t0.05\t4th\nF3\tS3\tF4\tS4\t0.0\t0.0\t0.0\tUN\n',
+            tmp_dir / 'low.kin0',
+            '#IID1\tIID2\tKINSHIP\tIBS0\nS1\tS2\t0.01\t0.5\n',
         )
-        result = process_ibdseg(path)
+        result = process_kinship(path)
         assert result.empty
 
     def test_missing_columns(self, tmp_dir: Path) -> None:
         """Return empty DataFrame when required columns are missing."""
         path = _write(
-            tmp_dir / 'bad.seg',
+            tmp_dir / 'bad.kin0',
             'COL_A\tCOL_B\nX\tY\n',
         )
-        result = process_ibdseg(path)
+        result = process_kinship(path)
         assert result.empty
 
-    def test_empty_seg(self, tmp_dir: Path) -> None:
-        """Return empty DataFrame for a header-only .seg file."""
-        path = _write(tmp_dir / 'empty.seg', _seg_header() + '\n')
-        result = process_ibdseg(path)
+    def test_empty_kin0(self, tmp_dir: Path) -> None:
+        """Return empty DataFrame for a header-only .kin0 file."""
+        path = _write(tmp_dir / 'empty.kin0', '#IID1\tIID2\tKINSHIP\tIBS0\n')
+        result = process_kinship(path)
         assert result.empty
 
     def test_multiple_degrees(self, tmp_dir: Path) -> None:
         """A sample with relationships at different degrees gets separate columns."""
         path = _write(
-            tmp_dir / 'multi.seg',
-            _seg_header() + '\nF1\tS1\tF2\tS2\t1.0\t0.0\t0.5\tPO\nF1\tS1\tF3\tS3\t0.2\t0.0\t0.1\t3rd\n',
+            tmp_dir / 'multi.kin0',
+            '#IID1\tIID2\tKINSHIP\tIBS0\nS1\tS2\t0.25\t0.01\nS1\tS3\t0.06\t0.1\n',
         )
-        result = process_ibdseg(path)
+        result = process_kinship(path)
         s1_row = result[result['IID'] == 'S1'].iloc[0]
-        assert 'S2:0.0:1.0:0.0:0.5' in s1_row['RELATED_1ST']
-        assert 'S3:0.8:0.2:0.0:0.1' in s1_row['RELATED_3RD']
-
-    def test_ibd0_clipped_to_zero(self, tmp_dir: Path) -> None:
-        """IBD0 derivation clamps at 0 when IBD1+IBD2 > 1 due to noise."""
-        path = _write(
-            tmp_dir / 'clip.seg',
-            _seg_header() + '\n'
-            # IBD1+IBD2 = 1.01, would give IBD0 = -0.01 without clipping
-            'F1\tS1\tF2\tS2\t0.51\t0.5\t0.755\tDup/MZ\n',
-        )
-        result = process_ibdseg(path)
-        s1_row = result[result['IID'] == 'S1'].iloc[0]
-        assert ':0.0:' in s1_row['RELATED_MZ']
+        assert 'S2:0.25:0.01' in s1_row['RELATED_1ST']
+        assert 'S3:0.06:0.1' in s1_row['RELATED_3RD']
 
 
 # -- process_bafregress --------------------------------------------------------
@@ -221,9 +200,9 @@ class TestEndToEnd:
             tmp_dir / 'test.sexcheck',
             '#FID\tIID\tPEDSEX\tSNPSEX\tSTATUS\tF\nFAM1\tS1\t1\t1\tOK\t0.99\nFAM2\tS2\t2\t2\tOK\t0.01\n',
         )
-        seg_path = _write(
-            tmp_dir / 'test.seg',
-            _seg_header() + '\nFAM1\tS1\tFAM2\tS2\t1.0\t0.0\t0.5\tPO\n',
+        kin0_path = _write(
+            tmp_dir / 'test.kin0',
+            '#IID1\tIID2\tKINSHIP\tIBS0\nS1\tS2\t0.25\t0.01\n',
         )
         baf_path = _write(
             tmp_dir / 'baf.txt',
@@ -240,8 +219,8 @@ class TestEndToEnd:
             het_path,
             '--sexcheck',
             sexcheck_path,
-            '--ibdseg',
-            seg_path,
+            '--kin0',
+            kin0_path,
             '--output',
             output_path,
             '--bafregress',
@@ -264,13 +243,12 @@ class TestEndToEnd:
         assert rows[0]['IID'] == 'S1'
         assert rows[1]['IID'] == 'S2'
 
-        # Check relatedness columns present
+        # Check kinship columns present
         for col in DEGREE_COLS:
             assert col in rows[0]
 
-        # S1 should have a 1st-degree (PO) relationship with S2, encoded
-        # as REL_ID:IBD0:IBD1:IBD2:PropIBD.
-        assert 'S2:0.0:1.0:0.0:0.5' in rows[0]['RELATED_1ST']
+        # S1 should have a 1st degree relationship with S2
+        assert 'S2' in rows[0]['RELATED_1ST']
 
         # Bafregress data should be merged
         assert 'LRR_mean' in rows[0]

@@ -316,6 +316,7 @@ class Plink2Qc(MultiCohortStage):
             'hwe': prefix / f'{output_base_name}.hwe',
             'het': prefix / f'{output_base_name}.het',
             'sexcheck': prefix / f'{output_base_name}.sexcheck',
+            'kin0': prefix / f'{output_base_name}.kin0',
             'log': prefix / f'{output_base_name}.log',
         }
 
@@ -395,7 +396,7 @@ class KingIbdseg(MultiCohortStage):
         return self.make_outputs(multicohort, data=outputs, jobs=[j])
 
 
-@stage(required_stages=[Plink2Qc, KingIbdseg, BafRegress], analysis_type='array_qc_report')
+@stage(required_stages=[Plink2Qc, BafRegress], analysis_type='array_qc_report')
 class QcReport(MultiCohortStage):
     """
     Create the QC report for an input object.
@@ -419,9 +420,6 @@ class QcReport(MultiCohortStage):
         plink_qc_smiss_path: Path = inputs.as_path(target=multicohort, stage=Plink2Qc, key='smiss')
         plink_qc_prefix = str(plink_qc_smiss_path).removesuffix('.smiss')
 
-        # Get the KING --ibdseg pairwise segment summary
-        seg_path: Path = inputs.as_path(target=multicohort, stage=KingIbdseg, key='seg')
-
         # Get all bafregress output paths from all cohorts
         bafregress_outputs: dict[str, Path] = inputs.as_path_by_target(stage=BafRegress)
         bafregress_paths: list[str] = [str(baf_out) for baf_out in bafregress_outputs.values()]
@@ -429,7 +427,6 @@ class QcReport(MultiCohortStage):
         # Call the Hail Batch job function
         j: BashJob = run_qc_report(
             plink_qc_prefix=plink_qc_prefix,
-            seg_path=str(seg_path),
             bafregress_paths=bafregress_paths,
             output_path=str(outputs),
             job_name=f'QcReport_{multicohort.name}',
