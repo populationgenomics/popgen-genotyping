@@ -343,7 +343,7 @@ class Plink2Qc(MultiCohortStage):
 
 
 @stage(
-    required_stages=[MergeCohortPlink],
+    required_stages=[MergeCohortPlink, BafRegress],
     analysis_type='array_relatedness_ibdseg',
     analysis_keys=['seg', 'seg_x'],
 )
@@ -375,15 +375,23 @@ class KingIbdseg(MultiCohortStage):
     def queue_jobs(self, multicohort: MultiCohort, inputs: StageInput) -> StageOutput:
         """
         Queue the KING `--ibdseg` job against the merged PLINK 1.9 dataset.
+
+        Per-cohort BAFRegress outputs are gathered and passed through; the job
+        excludes samples whose contamination estimate fails the BAFRegress
+        threshold (see ``BAFREGRESS_THRESHOLD`` in ``king_ibdseg_job``).
         """
         outputs: dict[str, Path] = self.expected_outputs(multicohort=multicohort)
 
         merged_plink: dict[str, Path] = inputs.as_dict(target=multicohort, stage=MergeCohortPlink)
 
+        bafregress_outputs: dict[str, Path] = inputs.as_path_by_target(stage=BafRegress)
+        bafregress_paths: list[str] = [str(baf_out) for baf_out in bafregress_outputs.values()]
+
         j: BashJob = run_king_ibdseg(
             bed_path=str(merged_plink['bed']),
             bim_path=str(merged_plink['bim']),
             fam_path=str(merged_plink['fam']),
+            bafregress_paths=bafregress_paths,
             output_seg_path=str(outputs['seg']),
             output_segments_path=str(outputs['segments']),
             output_seg_x_path=str(outputs['seg_x']),
