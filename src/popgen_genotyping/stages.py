@@ -18,6 +18,7 @@ from popgen_genotyping.jobs.king_ibdseg_job import run_king_ibdseg
 from popgen_genotyping.jobs.merge_cohort_plink_job import run_merge_plink
 from popgen_genotyping.jobs.plink2_qc_job import run_plink2_qc
 from popgen_genotyping.jobs.plink2_to_plink1_job import run_plink2_to_plink1
+from popgen_genotyping.jobs.plink_filter_for_king_job import run_plink_filter_for_king
 from popgen_genotyping.jobs.qc_report_job import run_qc_report
 from popgen_genotyping.metamist_utils import (
     query_reported_sex,
@@ -374,11 +375,13 @@ class KingIbdseg(MultiCohortStage):
 
     def queue_jobs(self, multicohort: MultiCohort, inputs: StageInput) -> StageOutput:
         """
-        Queue the KING `--ibdseg` job against the merged PLINK 1.9 dataset.
+        Queue the BAFRegress contamination filter + KING `--ibdseg` job chain.
 
-        Per-cohort BAFRegress outputs are gathered and passed through; the job
-        excludes samples whose contamination estimate fails the BAFRegress
-        threshold (see ``BAFREGRESS_THRESHOLD`` in ``king_ibdseg_job``).
+        The filter sub-job runs in the PLINK image and emits a contamination-
+        filtered PLINK 1.9 ResourceGroup; the KING sub-job runs in the KING
+        image and consumes that ResourceGroup directly (Hail Batch in-memory
+        wiring, no GCS round-trip). Mirrors the ``Plink2ToPlink1`` sub-job
+        pattern used inside ``MergeCohortPlink.queue_jobs``.
         """
         outputs: dict[str, Path] = self.expected_outputs(multicohort=multicohort)
 
@@ -387,11 +390,18 @@ class KingIbdseg(MultiCohortStage):
         bafregress_outputs: dict[str, Path] = inputs.as_path_by_target(stage=BafRegress)
         bafregress_paths: list[str] = [str(baf_out) for baf_out in bafregress_outputs.values()]
 
-        j: BashJob = run_king_ibdseg(
+        filter_job: BashJob
+        filtered_plink: ResourceGroup
+        filter_job, filtered_plink = run_plink_filter_for_king(
             bed_path=str(merged_plink['bed']),
             bim_path=str(merged_plink['bim']),
             fam_path=str(merged_plink['fam']),
             bafregress_paths=bafregress_paths,
+            job_name=f'PlinkFilterForKing_{multicohort.name}',
+        )
+
+        king_job: BashJob = run_king_ibdseg(
+            plink_input=filtered_plink,
             output_seg_path=str(outputs['seg']),
             output_segments_path=str(outputs['segments']),
             output_seg_x_path=str(outputs['seg_x']),
@@ -400,7 +410,7 @@ class KingIbdseg(MultiCohortStage):
             job_name=f'KingIbdseg_{multicohort.name}',
         )
 
-        return self.make_outputs(multicohort, data=outputs, jobs=[j])
+        return self.make_outputs(multicohort, data=outputs, jobs=[filter_job, king_job])
 
 
 @stage(required_stages=[Plink2Qc, KingIbdseg, BafRegress], analysis_type='array_qc_report')
