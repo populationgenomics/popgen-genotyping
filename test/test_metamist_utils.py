@@ -192,7 +192,7 @@ def test_query_previous_aggregate(mock_query):
     mock_query.return_value = {
         'analyses': [
             {
-                'outputs': {'pgen': 'gs://path/merged.pgen'},
+                'outputs': {'path': 'gs://path/merged.pgen'},
                 'project': {'sequencingGroups': [{'id': 'CPG001'}, {'id': 'CPG002'}]},
             }
         ]
@@ -200,7 +200,11 @@ def test_query_previous_aggregate(mock_query):
 
     outputs, active_sgs = query_previous_aggregate(123)
 
-    assert outputs == {'pgen': 'gs://path/merged.pgen'}
+    assert outputs == {
+        'pgen': 'gs://path/merged.pgen',
+        'psam': 'gs://path/merged.psam',
+        'pvar': 'gs://path/merged.pvar',
+    }
     assert active_sgs == ['CPG001', 'CPG002']
     mock_query.assert_called_once()
 
@@ -214,11 +218,7 @@ def test_query_previous_aggregate_active_only(mock_query):
     mock_query.return_value = {
         'analyses': [
             {
-                'outputs': {
-                    'bed': 'gs://path/merged.bed',
-                    'bim': 'gs://path/merged.bim',
-                    'fam': 'gs://path/merged.fam',
-                },
+                'outputs': {'path': 'gs://path/merged.pgen'},
                 'project': {
                     'sequencingGroups': [{'id': 'CPG001'}, {'id': 'CPG002'}]
                     # CPG003 is missing because it's inactive
@@ -234,6 +234,38 @@ def test_query_previous_aggregate_active_only(mock_query):
     assert 'CPG001' in active_sgs
     assert 'CPG002' in active_sgs
     assert 'CPG003' not in active_sgs
+
+
+@patch('popgen_genotyping.metamist_utils.query')
+def test_query_previous_aggregate_missing_path_raises(mock_query):
+    """A previous-aggregate analysis whose outputs lack a `path` field is invalid."""
+    mock_query.return_value = {
+        'analyses': [
+            {
+                'outputs': {},
+                'project': {'sequencingGroups': []},
+            }
+        ]
+    }
+
+    with pytest.raises(ValueError, match='valid PGEN output path'):
+        query_previous_aggregate(123)
+
+
+@patch('popgen_genotyping.metamist_utils.query')
+def test_query_previous_aggregate_non_pgen_path_raises(mock_query):
+    """A previous-aggregate path that doesn't end in `.pgen` is rejected."""
+    mock_query.return_value = {
+        'analyses': [
+            {
+                'outputs': {'path': 'gs://path/merged.bed'},
+                'project': {'sequencingGroups': []},
+            }
+        ]
+    }
+
+    with pytest.raises(ValueError, match='valid PGEN output path'):
+        query_previous_aggregate(123)
 
 
 @patch('popgen_genotyping.metamist_utils.query_previous_aggregate')
