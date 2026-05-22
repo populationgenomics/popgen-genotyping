@@ -14,7 +14,7 @@ from popgen_genotyping.jobs.king_ibdseg_job import (
     _X_SEG_HEADER,
     run_king_ibdseg,
 )
-from popgen_genotyping.stages import KingIbdseg
+from popgen_genotyping.stages import KingIbdseg, MergeCohortPlink
 
 # -- Helpers ------------------------------------------------------------------
 
@@ -205,4 +205,62 @@ class TestKingIbdsegExpectedOutputs:
         mock_prefix.assert_called_once_with(
             dataset=mock_multicohort.analysis_dataset,
             stage_name='KingIbdseg',
+        )
+
+
+# -- Tests: KingIbdseg.queue_jobs ---------------------------------------------
+
+
+class TestKingIbdsegQueueJobs:
+    """Wire-up between MergeCohortPlink inputs, expected_outputs, and the job factory."""
+
+    def test_passes_merged_plink_and_outputs_to_job(self) -> None:
+        """Bed/bim/fam map to bed/bim/fam; the five outputs map to the five job kwargs."""
+        mock_multicohort = MagicMock()
+        mock_multicohort.name = 'my_multicohort'
+
+        merged_plink: dict[str, Path] = {
+            'bed': Path('/merged/cohort.bed'),
+            'bim': Path('/merged/cohort.bim'),
+            'fam': Path('/merged/cohort.fam'),
+        }
+        mock_inputs = MagicMock()
+        mock_inputs.as_dict.return_value = merged_plink
+
+        expected_outputs: dict[str, Path] = {
+            'seg': Path('/out/20260115_king.seg'),
+            'segments': Path('/out/20260115_king.segments.gz'),
+            'seg_x': Path('/out/20260115_kingX.seg'),
+            'segments_x': Path('/out/20260115_kingX.segments.gz'),
+            'log': Path('/out/20260115_king.log'),
+        }
+        mock_self = MagicMock()
+        mock_self.expected_outputs.return_value = expected_outputs
+
+        with patch('popgen_genotyping.stages.run_king_ibdseg') as mock_run:
+            KingIbdseg.queue_jobs(mock_self, mock_multicohort, mock_inputs)
+
+        # Inputs are pulled from the right upstream stage.
+        mock_inputs.as_dict.assert_called_once_with(target=mock_multicohort, stage=MergeCohortPlink)
+
+        # The job factory receives plink inputs and outputs in their named slots
+        # -- this is the seam where #24-style cross-wiring would manifest.
+        mock_run.assert_called_once_with(
+            bed_path='/merged/cohort.bed',
+            bim_path='/merged/cohort.bim',
+            fam_path='/merged/cohort.fam',
+            output_seg_path='/out/20260115_king.seg',
+            output_segments_path='/out/20260115_king.segments.gz',
+            output_seg_x_path='/out/20260115_kingX.seg',
+            output_segments_x_path='/out/20260115_kingX.segments.gz',
+            output_log_path='/out/20260115_king.log',
+            job_name='KingIbdseg_my_multicohort',
+        )
+
+        # The same outputs dict flows through to make_outputs, and the job
+        # returned by run_king_ibdseg is the single job declared.
+        mock_self.make_outputs.assert_called_once_with(
+            mock_multicohort,
+            data=expected_outputs,
+            jobs=[mock_run.return_value],
         )
