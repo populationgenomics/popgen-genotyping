@@ -14,7 +14,7 @@ from popgen_genotyping.jobs.king_ibdseg_job import (
     _X_SEG_HEADER,
     run_king_ibdseg,
 )
-from popgen_genotyping.stages import KingIbdseg, MergeCohortPlink
+from popgen_genotyping.stages import BafRegress, KingIbdseg, MergeCohortPlink
 
 # -- Helpers ------------------------------------------------------------------
 
@@ -41,11 +41,13 @@ def _capture_run_king_ibdseg_command(tmp_path: Path) -> tuple[str, dict[str, Pat
     }
 
     mock_batch = MagicMock()
+    # run_king_ibdseg now takes the filtered PLINK ResourceGroup directly from
+    # the upstream filter sub-job rather than reading paths from GCS, so we
+    # construct a ResourceGroup-like mock and pass it straight through.
     plink_input = MagicMock()
     plink_input.bed = str(tmp_path / 'in.bed')
     plink_input.bim = str(tmp_path / 'in.bim')
     plink_input.fam = str(tmp_path / 'in.fam')
-    mock_batch.read_input_group.return_value = plink_input
 
     mock_job = MagicMock()
     for key, path in outputs.items():
@@ -57,9 +59,7 @@ def _capture_run_king_ibdseg_command(tmp_path: Path) -> tuple[str, dict[str, Pat
         patch('popgen_genotyping.jobs.king_ibdseg_job.config_retrieve', return_value='king-image:1.0'),
     ):
         run_king_ibdseg(
-            bed_path='gs://x/in.bed',
-            bim_path='gs://x/in.bim',
-            fam_path='gs://x/in.fam',
+            plink_input=plink_input,
             output_seg_path='gs://o/out.seg',
             output_segments_path='gs://o/out.segments.gz',
             output_seg_x_path='gs://o/outX.seg',
@@ -212,10 +212,10 @@ class TestKingIbdsegExpectedOutputs:
 
 
 class TestKingIbdsegQueueJobs:
-    """Wire-up between MergeCohortPlink inputs, expected_outputs, and the job factory."""
+    """Wire-up: MergeCohortPlink + BafRegress inputs -> filter -> KING -> outputs."""
 
-    def test_passes_merged_plink_and_outputs_to_job(self) -> None:
-        """Bed/bim/fam map to bed/bim/fam; the five outputs map to the five job kwargs."""
+    def test_filter_then_king_chain_is_wired(self) -> None:
+        """KING consumes the *filtered* ResourceGroup, not the merged paths."""
         mock_multicohort = MagicMock()
         mock_multicohort.name = 'my_multicohort'
 
@@ -224,8 +224,17 @@ class TestKingIbdsegQueueJobs:
             'bim': Path('/merged/cohort.bim'),
             'fam': Path('/merged/cohort.fam'),
         }
+        # `as_path_by_target` returns dict[Target, Path]; iteration order
+        # determines the order of bafregress_paths handed to the filter job.
+        target_a = MagicMock(name='target_a')
+        target_b = MagicMock(name='target_b')
+        bafregress_paths_by_target: dict[MagicMock, Path] = {
+            target_a: Path('gs://cohorts/a/baf.tsv'),
+            target_b: Path('gs://cohorts/b/baf.tsv'),
+        }
         mock_inputs = MagicMock()
         mock_inputs.as_dict.return_value = merged_plink
+        mock_inputs.as_path_by_target.return_value = bafregress_paths_by_target
 
         expected_outputs: dict[str, Path] = {
             'seg': Path('/out/20260115_king.seg'),
@@ -237,18 +246,34 @@ class TestKingIbdsegQueueJobs:
         mock_self = MagicMock()
         mock_self.expected_outputs.return_value = expected_outputs
 
-        with patch('popgen_genotyping.stages.run_king_ibdseg') as mock_run:
+        filter_job_mock = MagicMock(name='filter_job')
+        filtered_plink_mock = MagicMock(name='filtered_plink')
+
+        with (
+            patch('popgen_genotyping.stages.run_plink_filter_for_king') as mock_filter,
+            patch('popgen_genotyping.stages.run_king_ibdseg') as mock_king,
+        ):
+            mock_filter.return_value = (filter_job_mock, filtered_plink_mock)
             KingIbdseg.queue_jobs(mock_self, mock_multicohort, mock_inputs)
 
-        # Inputs are pulled from the right upstream stage.
+        # Inputs are pulled from both required upstream stages.
         mock_inputs.as_dict.assert_called_once_with(target=mock_multicohort, stage=MergeCohortPlink)
+        mock_inputs.as_path_by_target.assert_called_once_with(stage=BafRegress)
 
-        # The job factory receives plink inputs and outputs in their named slots
-        # -- this is the seam where #24-style cross-wiring would manifest.
-        mock_run.assert_called_once_with(
+        # Filter receives merged PLINK paths + ordered BAFRegress paths.
+        mock_filter.assert_called_once_with(
             bed_path='/merged/cohort.bed',
             bim_path='/merged/cohort.bim',
             fam_path='/merged/cohort.fam',
+            bafregress_paths=['gs://cohorts/a/baf.tsv', 'gs://cohorts/b/baf.tsv'],
+            job_name='PlinkFilterForKing_my_multicohort',
+        )
+
+        # KING consumes the filtered ResourceGroup, not the merged paths --
+        # this is the seam where a regression to inline `king --remove` (which
+        # KING 2.3.2 silently ignores) would manifest.
+        mock_king.assert_called_once_with(
+            plink_input=filtered_plink_mock,
             output_seg_path='/out/20260115_king.seg',
             output_segments_path='/out/20260115_king.segments.gz',
             output_seg_x_path='/out/20260115_kingX.seg',
@@ -257,10 +282,10 @@ class TestKingIbdsegQueueJobs:
             job_name='KingIbdseg_my_multicohort',
         )
 
-        # The same outputs dict flows through to make_outputs, and the job
-        # returned by run_king_ibdseg is the single job declared.
+        # Both jobs flow into make_outputs in dependency order; Hail Batch's
+        # job graph reads this list to chain the filter -> KING execution.
         mock_self.make_outputs.assert_called_once_with(
             mock_multicohort,
             data=expected_outputs,
-            jobs=[mock_run.return_value],
+            jobs=[filter_job_mock, mock_king.return_value],
         )
