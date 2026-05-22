@@ -8,6 +8,7 @@ from pathlib import Path
 # --- Configuration ---
 BCFTOOLS_IMAGE: str = 'australia-southeast1-docker.pkg.dev/cpg-common/images/bcftools:1.23-1'
 PLINK_IMAGE: str = 'australia-southeast1-docker.pkg.dev/cpg-common/images/plink:1.9-20250819-PLINK-2.0-20260228-1'
+KING_IMAGE: str = 'australia-southeast1-docker.pkg.dev/cpg-common/images/king:2.3.2-1'
 
 ROOT: Path = Path(__file__).parent.parent.parent
 LOCAL_DIR: Path = ROOT / 'test' / 'local'
