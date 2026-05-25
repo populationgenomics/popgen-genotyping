@@ -32,6 +32,11 @@ cpu = 1
 memory = 'standard'
 storage = '10G'
 
+[popgen_genotyping.cohort_cluster_stats]
+cpu = 2
+memory = 'standard'
+storage = '30G'
+
 [popgen_genotyping.cohort_bcf_to_plink]
 cpu = 8
 memory = 'highmem'

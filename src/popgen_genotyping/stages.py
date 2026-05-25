@@ -12,6 +12,7 @@ from cpg_utils.config import config_retrieve
 
 from popgen_genotyping.jobs.baf_regress_job import run_bafregress
 from popgen_genotyping.jobs.cohort_bcf_to_plink_job import run_cohort_bcf_to_plink
+from popgen_genotyping.jobs.cohort_cluster_stats_job import run_cohort_cluster_stats
 from popgen_genotyping.jobs.export_cohort_datasets_job import run_export_cohort_datasets
 from popgen_genotyping.jobs.gtc_to_bcfs_job import run_gtc_to_bcfs
 from popgen_genotyping.jobs.king_ibdseg_job import run_king_ibdseg
@@ -116,6 +117,52 @@ class BafRegress(CohortStage):
             output_path=str(outputs),
             af_ref_path=af_ref_path,
             job_name=f'BafRegress_{cohort.name}',
+        )
+
+        return self.make_outputs(cohort, data=outputs, jobs=[j])
+
+
+@stage(required_stages=[GtcToBcfs], analysis_type='array_cluster_stats', analysis_keys=['stats'])
+class CohortClusterStats(CohortStage):
+    """
+    Extract observed per-SNP cluster statistics from the cohort Heavy BCF.
+
+    Streams FORMAT/{GT, THETA, R} through a stdlib aggregator that groups by
+    genotype cluster (AA / AB / BB) and sex subset, emitting a bgzipped TSV
+    with per-cluster counts and (mean, var) of THETA and R per variant. These
+    feed the downstream multi-cohort SnpQcReport pooling step.
+    """
+
+    def expected_outputs(self, cohort: Cohort) -> dict[str, Path]:
+        """
+        Define the bgzipped cluster-stats TSV and its tabix index.
+        """
+        prefix: Path = get_output_prefix(dataset=cohort.dataset, stage_name=self.name)
+        return {
+            'stats': prefix / f'{cohort.id}.cluster_stats.tsv.gz',
+            'stats_tbi': prefix / f'{cohort.id}.cluster_stats.tsv.gz.tbi',
+        }
+
+    def queue_jobs(self, cohort: Cohort, inputs: StageInput) -> StageOutput:
+        """
+        Queue the per-cohort cluster-stats extraction job.
+        """
+        outputs: dict[str, Path] = self.expected_outputs(cohort)
+
+        heavy_bcf_path: Path = inputs.as_path(target=cohort, stage=GtcToBcfs, key='heavy_bcf')
+
+        # Restrict reported-sex mapping to this cohort's SGs.
+        full_sex_mapping: dict[str, str] = query_reported_sex(project=cohort.dataset.name)
+        cohort_sg_ids: set[str] = set(cohort.get_sequencing_group_ids())
+        sex_mapping: dict[str, str] = {
+            sg_id: sex_code for sg_id, sex_code in full_sex_mapping.items() if sg_id in cohort_sg_ids
+        }
+
+        j: BashJob = run_cohort_cluster_stats(
+            bcf_path=str(heavy_bcf_path),
+            output_stats_path=str(outputs['stats']),
+            sex_mapping=sex_mapping,
+            job_name=f'CohortClusterStats_{cohort.name}',
         )
 
         return self.make_outputs(cohort, data=outputs, jobs=[j])

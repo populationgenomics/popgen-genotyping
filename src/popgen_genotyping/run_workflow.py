@@ -10,6 +10,7 @@ from cpg_flow.workflow import run_workflow
 from popgen_genotyping.stages import (
     BafRegress,
     CohortBcfToPlink,
+    CohortClusterStats,
     ExportCohortDatasets,
     GtcToBcfs,
     KingIbdseg,
@@ -32,6 +33,7 @@ def cli_main() -> None:
     stages: list = [
         GtcToBcfs,
         BafRegress,
+        CohortClusterStats,
         CohortBcfToPlink,
         MergeCohortPlink,
         ExportCohortDatasets,
