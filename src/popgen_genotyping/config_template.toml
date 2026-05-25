@@ -76,6 +76,16 @@ egt_cluster_path = 'gs://...'
 # Optional: population allele frequency reference for BAFRegress
 # af_ref_path = 'gs://...'
 
+# Cohort PLINK2 aggregate consumed by MergeWithReferencePanel. Typically the
+# PGEN/PVAR/PSAM triplet produced by a prior `ExportCohortDatasets` run.
+# MergeWithReferencePanel has no cpg-flow required_stages — it reads these
+# paths directly from config, so any historical aggregate can be targeted
+# without re-running the upstream pipeline.
+[popgen_genotyping.references.cohort_aggregate]
+pgen_path = 'gs://cpg-<dataset>-main/<sequencing_subdir>/popgen_genotyping/ExportCohortDatasets/<version>/<datestamp>_cohort.pgen'
+pvar_path = 'gs://cpg-<dataset>-main/<sequencing_subdir>/popgen_genotyping/ExportCohortDatasets/<version>/<datestamp>_cohort.pvar'
+psam_path = 'gs://cpg-<dataset>-main/<sequencing_subdir>/popgen_genotyping/ExportCohortDatasets/<version>/<datestamp>_cohort.psam'
+
 # External reference panel (PLINK 1.9 fileset, pre-built upstream) consumed by
 # MergeWithReferencePanel. The references repo owns producing this artifact;
 # see https://github.com/populationgenomics/references for the source-of-truth.

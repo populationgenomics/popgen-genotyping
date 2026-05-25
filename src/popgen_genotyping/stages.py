@@ -398,20 +398,22 @@ class KingIbdseg(MultiCohortStage):
 
 
 @stage(
-    required_stages=[MergeCohortPlink],
     analysis_type='array_reference_panel_merged',
     analysis_keys=['pgen'],
 )
 class MergeWithReferencePanel(MultiCohortStage):
     """
-    Merge the multi-cohort PLINK 1.9 fileset with an external reference panel.
+    Merge a config-pointed cohort PLINK2 aggregate with an external reference panel.
 
-    The cohort is first normalized against the configured FASTA (REF set from
-    the genome, variant IDs re-derived, contigs re-prefixed with `chr`), so
-    this stage is robust to whatever allele-orientation state the upstream
-    `MergeCohortPlink` happens to produce. After validation against config
-    expectations, the merge uses `plink --bmerge --keep-allele-order` with a
-    `.missnp` retry path; the final output is converted to PLINK2.
+    This stage has no cpg-flow `required_stages` — it is deliberately
+    standalone, so an analysis-runner invocation with
+    `only_stages=['MergeWithReferencePanel']` can produce a reference-panel
+    merge against any historical `ExportCohortDatasets` output without
+    re-running the upstream pipeline. Both the cohort PGEN/PVAR/PSAM and the
+    reference panel BED/BIM/FAM are pointed at by config blocks under
+    `[popgen_genotyping.references.*]`. The cohort PGEN is round-tripped to
+    PLINK 1.9 inside the merge job, then normalized against the configured
+    FASTA before merging.
     """
 
     def expected_outputs(self, multicohort: MultiCohort) -> dict[str, Path]:
@@ -430,24 +432,21 @@ class MergeWithReferencePanel(MultiCohortStage):
             'stats': prefix / f'{base_name}_variant_intersection_stats.tsv',
         }
 
-    def queue_jobs(self, multicohort: MultiCohort, inputs: StageInput) -> StageOutput:
+    def queue_jobs(self, multicohort: MultiCohort, _inputs: StageInput) -> StageOutput:
         """
         Queue the reference-panel merge job for the multi-cohort.
         """
         outputs: dict[str, Path] = self.expected_outputs(multicohort=multicohort)
 
-        # Upstream cohort PLINK 1.9 fileset
-        cohort_plink: dict[str, Path] = inputs.as_dict(target=multicohort, stage=MergeCohortPlink)
-
-        # Reference panel + FASTA + assertions from config
+        cohort_cfg: dict[str, str] = config_retrieve(['popgen_genotyping', 'references', 'cohort_aggregate'])
         ref_cfg: dict[str, str] = config_retrieve(['popgen_genotyping', 'references', 'reference_panel'])
         fasta_ref: str = config_retrieve(['popgen_genotyping', 'references', 'fasta_ref_path'])
 
         j: BashJob = run_merge_with_reference_panel(
-            cohort_plink_paths={
-                'bed': str(cohort_plink['bed']),
-                'bim': str(cohort_plink['bim']),
-                'fam': str(cohort_plink['fam']),
+            cohort_pgen_paths={
+                'pgen': cohort_cfg['pgen_path'],
+                'pvar': cohort_cfg['pvar_path'],
+                'psam': cohort_cfg['psam_path'],
             },
             reference_panel_paths={
                 'bed': ref_cfg['bed_path'],

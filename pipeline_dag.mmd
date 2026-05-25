@@ -14,8 +14,8 @@ graph TD
     P2P1[Plink2ToPlink1<br/><i>PLINK2 to PLINK1.9 if needed</i>]:::conditional --> MCP
     MCP --> ECD[ExportCohortDatasets<br/><i>Export to PLINK2/BCF</i>]:::multicohort
     MCP --> KING[KingIbdseg<br/><i>KING --ibdseg Relatedness</i>]:::multicohort
-    MCP --> MWR[MergeWithReferencePanel<br/><i>Cohort + HGDP/1KG → PLINK2</i>]:::multicohort
-    REF[Reference Panel<br/><i>PLINK 1.9 from gs://cpg-common-main</i>]:::data --> MWR
+    ECD -..-> MWR[MergeWithReferencePanel<br/><i>(standalone) Cohort PGEN + HGDP/1KG → PLINK2</i>]:::multicohort
+    REF[Reference Panel<br/><i>PLINK 1.9 from gs://cpg-common-main</i>]:::data -..-> MWR
     ECD --> QC[Plink2Qc<br/><i>PLINK2 QC Suite</i>]:::multicohort
     QC --> QR[QcReport<br/><i>Combined QC CSV</i>]:::multicohort
     BAF --> QR

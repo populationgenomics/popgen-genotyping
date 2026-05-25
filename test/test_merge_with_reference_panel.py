@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from popgen_genotyping.jobs.merge_with_reference_panel_job import run_merge_with_reference_panel
-from popgen_genotyping.stages import MergeCohortPlink, MergeWithReferencePanel
+from popgen_genotyping.stages import MergeWithReferencePanel
 
 # -- Helpers ------------------------------------------------------------------
 
@@ -31,10 +31,10 @@ def _capture_merge_with_reference_panel_command() -> str:
         ),
     ):
         run_merge_with_reference_panel(
-            cohort_plink_paths={
-                'bed': 'gs://x/cohort.bed',
-                'bim': 'gs://x/cohort.bim',
-                'fam': 'gs://x/cohort.fam',
+            cohort_pgen_paths={
+                'pgen': 'gs://x/cohort.pgen',
+                'pvar': 'gs://x/cohort.pvar',
+                'psam': 'gs://x/cohort.psam',
             },
             reference_panel_paths={
                 'bed': 'gs://ref/ref.bed',
@@ -57,6 +57,23 @@ def _capture_merge_with_reference_panel_command() -> str:
 
 class TestRunMergeWithReferencePanelCommand:
     """Structural contract of the bash command queued by the job factory."""
+
+    def test_convert_step_round_trips_cohort_pgen_to_plink1(self) -> None:
+        """ConvertCohortToPlink1 produces a `cohort_plink1` BED/BIM/FAM via `plink2 --pfile`.
+
+        The rest of the merge pipeline (normalize, validate, intersect, merge)
+        operates in PLINK 1.9 and consumes `cohort_plink1` as its starting
+        fileset, so this round-trip is the contract between the stage's
+        config-pointed PGEN input and the existing PLINK 1.9 flow.
+        """
+        cmd: str = _capture_merge_with_reference_panel_command()
+        convert_section = cmd.split('ConvertCohortToPlink1')[1].split('NormalizeCohort')[0]
+        assert '--pfile' in convert_section
+        assert '--make-bed' in convert_section
+        assert '--out cohort_plink1' in convert_section
+        # The downstream normalize step reads from `cohort_plink1`.
+        normalize_section = cmd.split('NormalizeCohort')[1].split('ValidateAgainstExpectations')[0]
+        assert '--bfile cohort_plink1' in normalize_section
 
     def test_normalize_step_uses_fasta_anchored_ref(self) -> None:
         """NormalizeCohort must set REF authoritatively from the FASTA.
@@ -228,20 +245,19 @@ class TestMergeWithReferencePanelExpectedOutputs:
 
 
 class TestMergeWithReferencePanelQueueJobs:
-    """Wire-up between MergeCohortPlink inputs, config, and the job factory."""
+    """Wire-up between config-driven inputs and the job factory.
+
+    The stage has no `required_stages`; both the cohort PGEN/PVAR/PSAM and the
+    reference panel BED/BIM/FAM are pointed at by config.
+    """
 
     def test_passes_inputs_and_config_to_job(self) -> None:
-        """Cohort bed/bim/fam, reference paths, FASTA, and assertions flow through."""
+        """Cohort pgen/pvar/psam, reference paths, FASTA, and assertions flow through."""
         mock_multicohort = MagicMock()
         mock_multicohort.name = 'my_multicohort'
 
-        cohort_plink: dict[str, Path] = {
-            'bed': Path('/merged/cohort.bed'),
-            'bim': Path('/merged/cohort.bim'),
-            'fam': Path('/merged/cohort.fam'),
-        }
+        # `inputs` is unused by this stage — it reads everything from config.
         mock_inputs = MagicMock()
-        mock_inputs.as_dict.return_value = cohort_plink
 
         expected_outputs: dict[str, Path] = {
             'pgen': Path('/out/x.pgen'),
@@ -253,6 +269,11 @@ class TestMergeWithReferencePanelQueueJobs:
         mock_self = MagicMock()
         mock_self.expected_outputs.return_value = expected_outputs
 
+        cohort_cfg = {
+            'pgen_path': 'gs://c/cohort.pgen',
+            'pvar_path': 'gs://c/cohort.pvar',
+            'psam_path': 'gs://c/cohort.psam',
+        }
         ref_cfg = {
             'bed_path': 'gs://r/ref.bed',
             'bim_path': 'gs://r/ref.bim',
@@ -263,7 +284,9 @@ class TestMergeWithReferencePanelQueueJobs:
         }
 
         def fake_config_retrieve(path: list[str], default: object = None) -> object:  # noqa: ARG001
-            """Return the reference-panel sub-dict or the FASTA path by config key."""
+            """Return the cohort_aggregate / reference_panel sub-dict, or the FASTA path."""
+            if path == ['popgen_genotyping', 'references', 'cohort_aggregate']:
+                return cohort_cfg
             if path == ['popgen_genotyping', 'references', 'reference_panel']:
                 return ref_cfg
             if path == ['popgen_genotyping', 'references', 'fasta_ref_path']:
@@ -276,15 +299,15 @@ class TestMergeWithReferencePanelQueueJobs:
         ):
             MergeWithReferencePanel.queue_jobs(mock_self, mock_multicohort, mock_inputs)
 
-        # Upstream wired from MergeCohortPlink
-        mock_inputs.as_dict.assert_called_once_with(target=mock_multicohort, stage=MergeCohortPlink)
+        # Stage does not consult upstream cpg-flow inputs.
+        mock_inputs.as_dict.assert_not_called()
 
-        # Job factory called with cohort PLINK, reference paths, FASTA, expectations
+        # Job factory called with cohort PGEN, reference paths, FASTA, expectations
         mock_run.assert_called_once_with(
-            cohort_plink_paths={
-                'bed': '/merged/cohort.bed',
-                'bim': '/merged/cohort.bim',
-                'fam': '/merged/cohort.fam',
+            cohort_pgen_paths={
+                'pgen': 'gs://c/cohort.pgen',
+                'pvar': 'gs://c/cohort.pvar',
+                'psam': 'gs://c/cohort.psam',
             },
             reference_panel_paths={
                 'bed': 'gs://r/ref.bed',

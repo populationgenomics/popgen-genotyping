@@ -1,5 +1,5 @@
 """
-Job logic for merging the cohort PLINK 1.9 dataset with an external reference panel.
+Job logic for merging a cohort PLINK2 aggregate with an external reference panel.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 
 def run_merge_with_reference_panel(
-    cohort_plink_paths: dict[str, str],
+    cohort_pgen_paths: dict[str, str],
     reference_panel_paths: dict[str, str],
     fasta_ref_path: str,
     expected_contig_style: str,
@@ -27,23 +27,26 @@ def run_merge_with_reference_panel(
     job_name: str = 'merge_with_reference_panel',
 ) -> BashJob:
     """
-    Merge the cohort PLINK 1.9 fileset with an external reference panel.
+    Merge a cohort PLINK2 aggregate with an external reference panel.
 
-    The cohort is first normalized against the supplied FASTA reference: REF is
-    set authoritatively from the FASTA (so A1=ALT/A2=REF regardless of any
-    upstream allele-frequency swap), variant IDs are re-derived as
-    `chr:pos:ref:alt`, and contigs are re-prefixed with `chr` to match the
-    reference panel's convention. Conventions are then asserted against config
-    expectations. The per-locus intersect is computed inline as an awk ID hash
-    on the two BIMs; both sides are pre-filtered to that intersect via
-    `plink --extract` before a single `plink --bmerge --keep-allele-order`.
-    Because both BIMs use the FASTA-anchored `chr:pos:ref:alt` ID scheme, an ID
-    match implies an allele match — the intersect eliminates the `.missnp`
-    class of conflicts. Final output is PLINK2.
+    The cohort PGEN/PVAR/PSAM is first round-tripped to PLINK 1.9 (the merge
+    pipeline operates in PLINK 1.9 throughout), then normalized against the
+    supplied FASTA reference: REF is set authoritatively from the FASTA (so
+    A1=ALT/A2=REF regardless of any upstream allele-frequency swap), variant
+    IDs are re-derived as `chr:pos:ref:alt`, and contigs are re-prefixed with
+    `chr` to match the reference panel's convention. Conventions are then
+    asserted against config expectations. The per-locus intersect is computed
+    inline as an awk ID hash on the two BIMs; both sides are pre-filtered to
+    that intersect via `plink --extract` before a single `plink --bmerge
+    --keep-allele-order`. Because both BIMs use the FASTA-anchored
+    `chr:pos:ref:alt` ID scheme, an ID match implies an allele match — the
+    intersect eliminates the `.missnp` class of conflicts. Final output is
+    PLINK2.
 
     Args:
-        cohort_plink_paths (dict[str, str]): Cloud paths for the merged-cohort
-            PLINK 1.9 fileset (`bed`, `bim`, `fam`).
+        cohort_pgen_paths (dict[str, str]): Cloud paths for the merged-cohort
+            PLINK2 fileset (`pgen`, `pvar`, `psam`). Typically the output of a
+            prior `ExportCohortDatasets` run, pointed at by config.
         reference_panel_paths (dict[str, str]): Cloud paths for the reference
             panel PLINK 1.9 fileset (`bed`, `bim`, `fam`).
         fasta_ref_path (str): Cloud path to the GRCh38 FASTA (its `.fai` is
@@ -73,9 +76,9 @@ def run_merge_with_reference_panel(
 
     # 1. Stage inputs
     cohort_input = b.read_input_group(
-        bed=cohort_plink_paths['bed'],
-        bim=cohort_plink_paths['bim'],
-        fam=cohort_plink_paths['fam'],
+        pgen=cohort_pgen_paths['pgen'],
+        pvar=cohort_pgen_paths['pvar'],
+        psam=cohort_pgen_paths['psam'],
     )
     reference_input = b.read_input_group(
         bed=reference_panel_paths['bed'],
@@ -99,11 +102,22 @@ def run_merge_with_reference_panel(
     )
 
     # 3. Build the combined command
-    # NormalizeCohort, ValidateAgainstExpectations, ComputeIntersect, Merge,
-    # ConvertToPlink2, Stats - all in one BashJob with `set -e`.
+    # ConvertCohortToPlink1, NormalizeCohort, ValidateAgainstExpectations,
+    # ComputeIntersect, Merge, ConvertToPlink2, Stats - all in one BashJob
+    # with `set -e`.
     j.command(
         f"""
         set -ex
+
+        # ---- ConvertCohortToPlink1 -------------------------------------------
+        # Round-trip the cohort PGEN/PVAR/PSAM to PLINK 1.9 BED/BIM/FAM. The
+        # rest of the merge pipeline operates in PLINK 1.9 (the reference panel
+        # is distributed as PLINK 1.9), and the next step re-anchors REF/ALT
+        # against the FASTA anyway — so we don't need to preserve PGEN's native
+        # orientation through the round-trip.
+        plink2 --pfile {cohort_input} \\
+            --allow-extra-chr \\
+            --make-bed --out cohort_plink1
 
         # ---- NormalizeCohort -------------------------------------------------
         # Pass 1: anchor REF against the FASTA, restrict to bi-allelic ACGT SNPs,
@@ -117,7 +131,7 @@ def run_merge_with_reference_panel(
         # overwritten with the correct `chr:pos:ref:alt`.
         # `--snps-only just-acgt` drops indels and non-ACGT alleles; the
         # reference panel is bi-allelic SNPs only, so anything else is noise.
-        plink2 --bfile {cohort_input} \\
+        plink2 --bfile cohort_plink1 \\
             --fa {fasta_file.base} --ref-from-fa force \\
             --set-all-var-ids '@:#:$r:$a' \\
             --new-id-max-allele-len 100 \\
