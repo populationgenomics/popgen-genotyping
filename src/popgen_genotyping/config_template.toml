@@ -74,6 +74,30 @@ cpu = 2
 memory = 'standard'
 storage = '20G'
 
+[popgen_genotyping.snp_qc_report]
+cpu = 4
+memory = 'highmem'
+storage = '50G'
+
+# Resources for the bcftools EGT-INFO extract sub-job (Job 1 of SnpQcReport).
+# Tiny job; defaults are fine but exposed for parity.
+[popgen_genotyping.snp_qc_report.extract]
+cpu = 1
+memory = 'standard'
+storage = '10G'
+
+[popgen_genotyping.snp_qc_report.thresholds]
+gentrain_score_min = 0.7
+cluster_sep_min = 0.4
+vmiss_max = 0.02
+hwe_p_min = 1e-6
+call_rate_range_max = 0.05
+af_chi2_p_min = 1e-6
+egt_centroid_delta_max = 0.1
+cluster_icc_max = 0.5
+cluster_spread_max = 0.01
+cluster_separation_min = 0.15
+
 [popgen_genotyping.references]
 fasta_ref_path = 'gs://cpg-common-main/references/hg38/v0/Homo_sapiens_assembly38.fasta'
 bpm_manifest_path = 'gs://...'

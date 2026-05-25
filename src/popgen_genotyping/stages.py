@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from cpg_flow.stage import CohortStage, MultiCohortStage, stage
-from cpg_utils.config import config_retrieve
+from cpg_utils.config import config_retrieve, reference_path
 
 from popgen_genotyping.jobs.baf_regress_job import run_bafregress
 from popgen_genotyping.jobs.cohort_bcf_to_plink_job import run_cohort_bcf_to_plink
@@ -21,6 +21,7 @@ from popgen_genotyping.jobs.merge_cohort_plink_job import run_merge_plink
 from popgen_genotyping.jobs.plink2_qc_job import run_plink2_qc
 from popgen_genotyping.jobs.plink2_to_plink1_job import run_plink2_to_plink1
 from popgen_genotyping.jobs.qc_report_job import run_qc_report
+from popgen_genotyping.jobs.snp_qc_report_job import run_snp_qc_report
 from popgen_genotyping.metamist_utils import (
     query_reported_sex,
     resolve_cohort_gtc_mapping,
@@ -482,6 +483,97 @@ class KingIbdseg(MultiCohortStage):
         )
 
         return self.make_outputs(multicohort, data=outputs, jobs=[j])
+
+
+@stage(
+    required_stages=[Plink2Qc, CohortPlinkQc, CohortClusterStats],
+    analysis_type='array_snp_qc',
+    analysis_keys=['exclusion_list'],
+)
+class SnpQcReport(MultiCohortStage):
+    """
+    Synthesise per-SNP QC across all sources and emit a side-car exclusion list.
+
+    Joins Illumina EGT INFO (from the references-repo sample-less BCF),
+    merged-set PLINK2 site stats from `Plink2Qc`, per-cohort PLINK2 stats from
+    `CohortPlinkQc`, and per-cohort cluster moments from `CohortClusterStats`.
+    Outputs:
+
+    - audit TSV (`.tsv.gz`): one row per variant with every metric + filter flag.
+    - exclusion `.snplist`: one variant ID per line — the consumable artefact
+      that downstream tools pass to `plink2 --extract` / `--exclude`.
+    - summary TSV: per-filter drop counts.
+
+    The PGEN released by `ExportCohortDatasets` is **not** filtered in place;
+    the exclusion list is a side-car.
+    """
+
+    def expected_outputs(self, multicohort: MultiCohort) -> dict[str, Path]:
+        """
+        Define the audit TSV, exclusion list, and summary TSV outputs.
+        """
+        prefix: Path = get_output_prefix(dataset=multicohort.analysis_dataset, stage_name=self.name)
+        datestamp: str = datetime.now(tz=timezone.utc).strftime('%Y%m%d')
+        return {
+            'audit_tsv': prefix / f'{datestamp}_snp_qc.audit.tsv.gz',
+            'exclusion_list': prefix / f'{datestamp}_snp_qc.exclude.snplist',
+            'summary_tsv': prefix / f'{datestamp}_snp_qc.summary.tsv',
+        }
+
+    def queue_jobs(self, multicohort: MultiCohort, inputs: StageInput) -> StageOutput:
+        """
+        Queue the EGT-INFO extract + multi-cohort synthesis chain.
+        """
+        outputs: dict[str, Path] = self.expected_outputs(multicohort=multicohort)
+
+        merged_qc_smiss_path: Path = inputs.as_path(target=multicohort, stage=Plink2Qc, key='smiss')
+        merged_qc_prefix: str = str(merged_qc_smiss_path).removesuffix('.smiss')
+
+        cohort_plink_qc: dict[str, dict[str, str]] = {}
+        for cohort_id, cohort_outs in inputs.as_dict_by_target(stage=CohortPlinkQc).items():
+            cohort_plink_qc[cohort_id] = {
+                'vmiss': str(cohort_outs['vmiss']),
+                'afreq': str(cohort_outs['afreq']),
+                'hardy': str(cohort_outs['hardy']),
+            }
+
+        cohort_cluster_stats: dict[str, str] = {
+            cohort_id: str(stats['stats'])
+            for cohort_id, stats in inputs.as_dict_by_target(stage=CohortClusterStats).items()
+        }
+
+        thresholds_path = ['popgen_genotyping', 'snp_qc_report', 'thresholds']
+        thresholds: dict[str, float] = {
+            'gentrain_min': config_retrieve([*thresholds_path, 'gentrain_score_min'], 0.7),
+            'cluster_sep_min': config_retrieve([*thresholds_path, 'cluster_sep_min'], 0.4),
+            'vmiss_max': config_retrieve([*thresholds_path, 'vmiss_max'], 0.02),
+            'hwe_p_min': config_retrieve([*thresholds_path, 'hwe_p_min'], 1e-6),
+            'call_rate_range_max': config_retrieve([*thresholds_path, 'call_rate_range_max'], 0.05),
+            'af_chi2_p_min': config_retrieve([*thresholds_path, 'af_chi2_p_min'], 1e-6),
+            'egt_centroid_delta_max': config_retrieve([*thresholds_path, 'egt_centroid_delta_max'], 0.1),
+            'cluster_icc_max': config_retrieve([*thresholds_path, 'cluster_icc_max'], 0.5),
+            'cluster_spread_max': config_retrieve([*thresholds_path, 'cluster_spread_max'], 0.01),
+            'cluster_separation_min': config_retrieve([*thresholds_path, 'cluster_separation_min'], 0.15),
+        }
+
+        jobs: list[BashJob] = run_snp_qc_report(
+            egt_info_bcf_path=reference_path('illumina_microarray/GDA_8v1_0_D1_ClusterFile_egt_info_bcf'),
+            egt_info_bcf_index_path=reference_path(
+                'illumina_microarray/GDA_8v1_0_D1_ClusterFile_egt_info_bcf_index',
+            ),
+            merged_vmiss_path=f'{merged_qc_prefix}.vmiss',
+            merged_afreq_path=f'{merged_qc_prefix}.afreq',
+            merged_hardy_path=f'{merged_qc_prefix}.hardy',
+            cohort_plink_qc=cohort_plink_qc,
+            cohort_cluster_stats=cohort_cluster_stats,
+            thresholds=thresholds,
+            output_audit_tsv_path=str(outputs['audit_tsv']),
+            output_exclusion_list_path=str(outputs['exclusion_list']),
+            output_summary_tsv_path=str(outputs['summary_tsv']),
+            job_name=f'SnpQcReport_{multicohort.name}',
+        )
+
+        return self.make_outputs(multicohort, data=outputs, jobs=jobs)
 
 
 @stage(required_stages=[Plink2Qc, BafRegress], analysis_type='array_qc_report')
