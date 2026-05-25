@@ -34,8 +34,12 @@ def run_merge_with_reference_panel(
     upstream allele-frequency swap), variant IDs are re-derived as
     `chr:pos:ref:alt`, and contigs are re-prefixed with `chr` to match the
     reference panel's convention. Conventions are then asserted against config
-    expectations; the merge runs with `plink --bmerge --keep-allele-order` and
-    retries once after dropping any sites in `.missnp`. Final output is PLINK2.
+    expectations. The per-locus intersect is computed inline as an awk ID hash
+    on the two BIMs; both sides are pre-filtered to that intersect via
+    `plink --extract` before a single `plink --bmerge --keep-allele-order`.
+    Because both BIMs use the FASTA-anchored `chr:pos:ref:alt` ID scheme, an ID
+    match implies an allele match — the intersect eliminates the `.missnp`
+    class of conflicts. Final output is PLINK2.
 
     Args:
         cohort_plink_paths (dict[str, str]): Cloud paths for the merged-cohort
@@ -95,7 +99,7 @@ def run_merge_with_reference_panel(
     )
 
     # 3. Build the combined command
-    # NormalizeCohort, ValidateAgainstExpectations, Merge (+ missnp retry),
+    # NormalizeCohort, ValidateAgainstExpectations, ComputeIntersect, Merge,
     # ConvertToPlink2, Stats - all in one BashJob with `set -e`.
     j.command(
         f"""
@@ -158,39 +162,35 @@ def run_merge_with_reference_panel(
             exit 1
         fi
 
-        # ---- Merge (first attempt) -------------------------------------------
-        # Allow a single failure: PLINK 1.9 returns non-zero on .missnp.
-        set +e
-        plink --bfile normalized_cohort \\
-            --bmerge {reference_input} \\
+        # ---- ComputeIntersect ------------------------------------------------
+        # Build the per-locus extract list as the intersection of variant IDs.
+        # Both BIMs use the FASTA-anchored chr:pos:ref:alt ID scheme (asserted
+        # above), so an ID match implies an allele match — pre-filtering by
+        # this list eliminates the .missnp class of merge conflicts and makes
+        # a retry path unnecessary.
+        awk 'NR==FNR {{ref[$2]=1; next}} ($2 in ref) {{print $2}}' \\
+            {reference_input.bim} normalized_cohort.bim > common.ids
+
+        # Fail fast on a fully-disjoint panel: bmerge on empty filesets would
+        # abort downstream with a less informative error.
+        if [ ! -s common.ids ]; then
+            echo "no variants in common between normalized cohort and reference panel" >&2
+            exit 1
+        fi
+
+        plink --bfile normalized_cohort --extract common.ids \\
+            --allow-extra-chr --keep-allele-order \\
+            --make-bed --out cohort_intersect
+        plink --bfile {reference_input} --extract common.ids \\
+            --allow-extra-chr --keep-allele-order \\
+            --make-bed --out reference_intersect
+
+        # ---- Merge -----------------------------------------------------------
+        plink --bfile cohort_intersect \\
+            --bmerge reference_intersect \\
             --allow-extra-chr \\
             --keep-allele-order \\
-            --make-bed --out first_merge
-        first_rc=$?
-        set -e
-
-        if [ "$first_rc" -ne 0 ]; then
-            if [ ! -s first_merge.missnp ]; then
-                echo "merge step failed without producing .missnp; check first_merge.log" >&2
-                exit "$first_rc"
-            fi
-            # ---- Drop .missnp on both sides, retry -----------------------------
-            plink --bfile normalized_cohort --exclude first_merge.missnp \\
-                --allow-extra-chr --keep-allele-order \\
-                --make-bed --out cohort_clean
-            plink --bfile {reference_input} --exclude first_merge.missnp \\
-                --allow-extra-chr --keep-allele-order \\
-                --make-bed --out reference_clean
-            plink --bfile cohort_clean \\
-                --bmerge reference_clean \\
-                --allow-extra-chr --keep-allele-order \\
-                --make-bed --out final_merge
-        else
-            mv first_merge.bed final_merge.bed
-            mv first_merge.bim final_merge.bim
-            mv first_merge.fam final_merge.fam
-            mv first_merge.log final_merge.log
-        fi
+            --make-bed --out final_merge
 
         # ---- ConvertToPlink2 -------------------------------------------------
         plink2 --bfile final_merge --allow-extra-chr --make-pgen --out {j.merged_pgen}
@@ -200,11 +200,9 @@ def run_merge_with_reference_panel(
         cohort_dup_position_n=$(wc -l < duplicate_position_var_ids.txt)
         cohort_n=$(wc -l < normalized_cohort.bim)
         ref_n=$(wc -l < {reference_input.bim})
-        if [ -s first_merge.missnp ]; then
-            missnp_n=$(wc -l < first_merge.missnp)
-        else
-            missnp_n=0
-        fi
+        intersect_n=$(wc -l < common.ids)
+        cohort_only_n=$((cohort_n - intersect_n))
+        ref_only_n=$((ref_n - intersect_n))
         final_n=$(wc -l < final_merge.bim)
         {{
             printf 'metric\\tvalue\\n'
@@ -212,7 +210,9 @@ def run_merge_with_reference_panel(
             printf 'cohort_variants_dropped_duplicate_position\\t%s\\n' "$cohort_dup_position_n"
             printf 'cohort_variants_pre_merge\\t%s\\n' "$cohort_n"
             printf 'reference_variants_pre_merge\\t%s\\n' "$ref_n"
-            printf 'missnp_dropped\\t%s\\n' "$missnp_n"
+            printf 'intersect_variants\\t%s\\n' "$intersect_n"
+            printf 'cohort_only_variants\\t%s\\n' "$cohort_only_n"
+            printf 'reference_only_variants\\t%s\\n' "$ref_only_n"
             printf 'final_merged_variants\\t%s\\n' "$final_n"
         }} > {j.stats.tsv}
 

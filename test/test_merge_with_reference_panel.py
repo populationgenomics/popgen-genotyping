@@ -110,7 +110,7 @@ class TestRunMergeWithReferencePanelCommand:
     def test_validate_step_asserts_both_sides(self) -> None:
         """Validation must check contig style + variant ID pattern on cohort AND reference."""
         cmd: str = _capture_merge_with_reference_panel_command()
-        validate_section = cmd.split('ValidateAgainstExpectations')[1].split('Merge (first attempt)')[0]
+        validate_section = cmd.split('ValidateAgainstExpectations')[1].split('ComputeIntersect')[0]
         # contig-style assertions: one per side
         assert validate_section.count('contig style') == 2
         assert 'normalized_cohort.bim' in validate_section
@@ -119,32 +119,70 @@ class TestRunMergeWithReferencePanelCommand:
         # Both assertions exit non-zero on mismatch
         assert validate_section.count('exit 1') >= 4
 
-    def test_all_plink_19_steps_preserve_allele_order(self) -> None:
-        """Every PLINK 1.9 step (both bmerges, both retry excludes) keeps allele order.
+    def test_intersect_step_builds_common_ids_via_awk_id_hash(self) -> None:
+        """Common-ID list is computed by awk hash on the variant-ID column ($2) of both BIMs.
 
-        Four invocations expected in the queued bash:
-          1. first --bmerge attempt
-          2. cohort --exclude first_merge.missnp (retry pre-step)
-          3. reference --exclude first_merge.missnp (retry pre-step)
-          4. final --bmerge on cleaned filesets
-
-        plink2 calls (NormalizeCohort, ConvertToPlink2) do not need this flag
-        because plink2's --make-bed preserves REF/ALT orientation by default.
+        Both BIMs use the FASTA-anchored `chr:pos:ref:alt` ID scheme (the
+        validate step asserts this), so an ID match implies an allele match —
+        the intersect makes the legacy `.missnp` retry path dead code.
         """
         cmd: str = _capture_merge_with_reference_panel_command()
-        assert cmd.count('--bmerge') == 2
-        assert cmd.count('--exclude first_merge.missnp') == 2
-        assert cmd.count('--keep-allele-order') == 4
+        intersect_section = cmd.split('ComputeIntersect')[1].split('# ---- Merge')[0]
+        assert 'NR==FNR' in intersect_section
+        assert 'ref[$2]' in intersect_section
+        assert '$2 in ref' in intersect_section
+        assert 'common.ids' in intersect_section
 
-    def test_missnp_retry_targets_both_sides_with_exclude(self) -> None:
-        """Retry path applies --exclude to both cohort and reference (not just one)."""
+    def test_intersect_step_fails_fast_on_empty_common_ids(self) -> None:
+        """A fully-disjoint panel triggers an explicit non-zero exit before bmerge.
+
+        Without this guard, `plink --extract` on an empty list produces an
+        empty fileset and `--bmerge` fails downstream with a less informative
+        error. We surface the disjoint-panel case directly.
+        """
         cmd: str = _capture_merge_with_reference_panel_command()
-        retry_section = cmd.split('Drop .missnp on both sides, retry')[1].split('ConvertToPlink2')[0]
-        assert retry_section.count('--exclude first_merge.missnp') == 2
-        # cohort_clean and reference_clean are both produced before the retry merge
-        assert '--out cohort_clean' in retry_section
-        assert '--out reference_clean' in retry_section
-        assert '--bmerge reference_clean' in retry_section
+        intersect_section = cmd.split('ComputeIntersect')[1].split('# ---- Merge')[0]
+        assert '[ ! -s common.ids ]' in intersect_section
+        assert 'no variants in common' in intersect_section
+        assert 'exit 1' in intersect_section
+
+    def test_intersect_step_extracts_both_sides_before_merge(self) -> None:
+        """Both cohort and reference are pre-filtered with `--extract common.ids`."""
+        cmd: str = _capture_merge_with_reference_panel_command()
+        intersect_section = cmd.split('ComputeIntersect')[1].split('ConvertToPlink2')[0]
+        assert intersect_section.count('--extract common.ids') == 2
+        assert '--out cohort_intersect' in intersect_section
+        assert '--out reference_intersect' in intersect_section
+        assert '--bmerge reference_intersect' in intersect_section
+
+    def test_all_plink_19_steps_preserve_allele_order(self) -> None:
+        """Every PLINK 1.9 step (both extracts, single bmerge) keeps allele order.
+
+        Three invocations expected in the queued bash:
+          1. cohort `--extract common.ids`
+          2. reference `--extract common.ids`
+          3. single `--bmerge` on the intersected filesets
+
+        The intersect eliminates allele-set conflicts, so no `.missnp` retry
+        path is queued.
+
+        plink2 calls (NormalizeCohort, ConvertToPlink2) do not need this flag
+        because plink2's `--make-bed` preserves REF/ALT orientation by default.
+        """
+        cmd: str = _capture_merge_with_reference_panel_command()
+        assert cmd.count('--bmerge') == 1
+        assert cmd.count('--extract common.ids') == 2
+        assert cmd.count('--keep-allele-order') == 3
+
+    def test_stats_tsv_emits_intersect_and_side_only_counts(self) -> None:
+        """Stats TSV reports the intersect-derived locus accounting."""
+        cmd: str = _capture_merge_with_reference_panel_command()
+        stats_section = cmd.split('# ---- Stats')[1].split('# ---- Capture log')[0]
+        assert 'intersect_variants' in stats_section
+        assert 'cohort_only_variants' in stats_section
+        assert 'reference_only_variants' in stats_section
+        # The legacy missnp metric is gone (no retry path → nothing to report)
+        assert 'missnp_dropped' not in stats_section
 
     def test_converts_final_output_to_plink2(self) -> None:
         """Final output is PLINK2 PGEN, written by plink2 --make-pgen."""
