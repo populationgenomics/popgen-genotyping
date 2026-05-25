@@ -72,7 +72,40 @@ class TestRunMergeWithReferencePanelCommand:
         assert '--ref-from-fa force' in normalize_section
         assert "--set-all-var-ids '@:#:$r:$a'" in normalize_section
         assert '--output-chr chrM' in normalize_section
+
+    def test_normalize_step_restricts_to_biallelic_acgt_snps(self) -> None:
+        """NormalizeCohort drops indels, non-ACGT alleles, and multiallelics.
+
+        The reference panel is bi-allelic SNPs only; aligning the cohort
+        to the same surface keeps the merge boundary clean.
+        """
+        cmd: str = _capture_merge_with_reference_panel_command()
+        normalize_section = cmd.split('NormalizeCohort')[1].split('ValidateAgainstExpectations')[0]
+        assert '--snps-only just-acgt' in normalize_section
         assert '--max-alleles 2' in normalize_section
+
+    def test_normalize_step_drops_all_variants_at_duplicate_positions(self) -> None:
+        """Every variant at any position with >1 record is excluded (keeping none).
+
+        `--rm-dup` would only catch identical variant IDs; e.g. (A,C) and
+        (A,T) at the same coordinate both survive `--rm-dup` but would
+        confuse `plink --bmerge` downstream. The awk pass keys off chr+pos
+        and emits *all* IDs at any duplicated position so the subsequent
+        `--exclude` removes the whole group.
+        """
+        cmd: str = _capture_merge_with_reference_panel_command()
+        normalize_section = cmd.split('NormalizeCohort')[1].split('ValidateAgainstExpectations')[0]
+        # Stage-1 output, awk dedup, stage-2 plink2 with --exclude
+        assert '--out normalized_cohort_pre_dedup' in normalize_section
+        assert 'duplicate_position_var_ids.txt' in normalize_section
+        # The awk must reference $1 (chr) and $4 (bp) of the BIM and emit
+        # IDs only when the chr+bp count is >1.
+        assert 'count[$1' in normalize_section
+        assert '$4' in normalize_section
+        assert 'count[$1' in normalize_section and '> 1' in normalize_section
+        # Final exclude pass produces the dedup'd normalized_cohort
+        assert '--exclude duplicate_position_var_ids.txt' in normalize_section
+        assert '--out normalized_cohort' in normalize_section
 
     def test_validate_step_asserts_both_sides(self) -> None:
         """Validation must check contig style + variant ID pattern on cohort AND reference."""

@@ -102,18 +102,39 @@ def run_merge_with_reference_panel(
         set -ex
 
         # ---- NormalizeCohort -------------------------------------------------
+        # Pass 1: anchor REF against the FASTA, restrict to bi-allelic ACGT SNPs,
+        # re-derive variant IDs as chr:pos:ref:alt, re-prefix contigs.
+        #
         # `--ref-from-fa force` makes the FASTA authoritative for REF at every
         # site, neutralizing any upstream A1/A2 frequency swaps (e.g. the
         # PLINK 1.9 `--make-bed` minor-allele rotation) before the merge.
         # `--set-all-var-ids` re-derives every ID from the FASTA-anchored
         # orientation, so stale IDs from a frequency-swapped upstream are
         # overwritten with the correct `chr:pos:ref:alt`.
+        # `--snps-only just-acgt` drops indels and non-ACGT alleles; the
+        # reference panel is bi-allelic SNPs only, so anything else is noise.
         plink2 --bfile {cohort_input} \\
             --fa {fasta_file.base} --ref-from-fa force \\
             --set-all-var-ids '@:#:$r:$a' \\
             --new-id-max-allele-len 100 \\
+            --snps-only just-acgt \\
             --max-alleles 2 \\
             --output-chr chrM \\
+            --allow-extra-chr \\
+            --make-bed --out normalized_cohort_pre_dedup
+
+        # Pass 2: drop every variant at any position with more than one record.
+        # `--rm-dup` keys off variant IDs and would not catch e.g. (A,C) and
+        # (A,T) at the same coordinate, which still confuses the merge step.
+        # awk identifies positions with multiple records and emits the IDs of
+        # *all* of them so the next `--exclude` removes the whole group
+        # (keeping none, per the merge contract).
+        awk 'NR==FNR {{count[$1"\\t"$4]++; next}} count[$1"\\t"$4] > 1 {{print $2}}' \\
+            normalized_cohort_pre_dedup.bim normalized_cohort_pre_dedup.bim \\
+            > duplicate_position_var_ids.txt
+
+        plink2 --bfile normalized_cohort_pre_dedup \\
+            --exclude duplicate_position_var_ids.txt \\
             --allow-extra-chr \\
             --make-bed --out normalized_cohort
 
@@ -175,6 +196,8 @@ def run_merge_with_reference_panel(
         plink2 --bfile final_merge --allow-extra-chr --make-pgen --out {j.merged_pgen}
 
         # ---- Stats -----------------------------------------------------------
+        cohort_pre_dedup_n=$(wc -l < normalized_cohort_pre_dedup.bim)
+        cohort_dup_position_n=$(wc -l < duplicate_position_var_ids.txt)
         cohort_n=$(wc -l < normalized_cohort.bim)
         ref_n=$(wc -l < {reference_input.bim})
         if [ -s first_merge.missnp ]; then
@@ -185,6 +208,8 @@ def run_merge_with_reference_panel(
         final_n=$(wc -l < final_merge.bim)
         {{
             printf 'metric\\tvalue\\n'
+            printf 'cohort_variants_post_snp_filter\\t%s\\n' "$cohort_pre_dedup_n"
+            printf 'cohort_variants_dropped_duplicate_position\\t%s\\n' "$cohort_dup_position_n"
             printf 'cohort_variants_pre_merge\\t%s\\n' "$cohort_n"
             printf 'reference_variants_pre_merge\\t%s\\n' "$ref_n"
             printf 'missnp_dropped\\t%s\\n' "$missnp_n"
