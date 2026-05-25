@@ -75,6 +75,7 @@ def run_plink2_qc(
         f"""
         set -ex
         plink2 --pfile {pgen_files} \\
+            --output-chr chrM \\
             --missing \\
             --freq \\
             --hardy \\

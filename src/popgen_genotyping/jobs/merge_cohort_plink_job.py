@@ -74,7 +74,8 @@ def run_merge_plink(
             j.command(
                 f"""
                 set -ex
-                plink --bfile {prev_resource} --allow-extra-chr --remove {samples_to_remove_resource} \\
+                plink --bfile {prev_resource} --allow-extra-chr --output-chr chrM \\
+                    --remove {samples_to_remove_resource} \\
                     --keep-allele-order --make-bed --out {j.filtered_prev}
                 """
             )
@@ -110,6 +111,7 @@ def run_merge_plink(
             f"""
             plink --bfile {first_prefix} \
                 --allow-extra-chr \
+                --output-chr chrM \
                 --make-bed \
                 --keep-allele-order \
                 --out {j.output_plink}
@@ -126,6 +128,7 @@ def run_merge_plink(
             plink --bfile {first_prefix} \
                 --merge-list mergelist.txt \
                 --allow-extra-chr \
+                --output-chr chrM \
                 --make-bed \
                 --keep-allele-order \
                 --out {j.output_plink}
