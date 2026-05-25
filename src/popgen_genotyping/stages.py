@@ -16,6 +16,7 @@ from popgen_genotyping.jobs.export_cohort_datasets_job import run_export_cohort_
 from popgen_genotyping.jobs.gtc_to_bcfs_job import run_gtc_to_bcfs
 from popgen_genotyping.jobs.king_ibdseg_job import run_king_ibdseg
 from popgen_genotyping.jobs.merge_cohort_plink_job import run_merge_plink
+from popgen_genotyping.jobs.merge_with_reference_panel_job import run_merge_with_reference_panel
 from popgen_genotyping.jobs.plink2_qc_job import run_plink2_qc
 from popgen_genotyping.jobs.plink2_to_plink1_job import run_plink2_to_plink1
 from popgen_genotyping.jobs.qc_report_job import run_qc_report
@@ -391,6 +392,75 @@ class KingIbdseg(MultiCohortStage):
             output_segments_x_path=str(outputs['segments_x']),
             output_log_path=str(outputs['log']),
             job_name=f'KingIbdseg_{multicohort.name}',
+        )
+
+        return self.make_outputs(multicohort, data=outputs, jobs=[j])
+
+
+@stage(
+    required_stages=[MergeCohortPlink],
+    analysis_type='array_reference_panel_merged',
+    analysis_keys=['pgen'],
+)
+class MergeWithReferencePanel(MultiCohortStage):
+    """
+    Merge the multi-cohort PLINK 1.9 fileset with an external reference panel.
+
+    The cohort is first normalized against the configured FASTA (REF set from
+    the genome, variant IDs re-derived, contigs re-prefixed with `chr`), so
+    this stage is robust to whatever allele-orientation state the upstream
+    `MergeCohortPlink` happens to produce. After validation against config
+    expectations, the merge uses `plink --bmerge --keep-allele-order` with a
+    `.missnp` retry path; the final output is converted to PLINK2.
+    """
+
+    def expected_outputs(self, multicohort: MultiCohort) -> dict[str, Path]:
+        """
+        Define the merged-with-reference PLINK2 fileset and associated artifacts.
+        """
+        prefix: Path = get_output_prefix(dataset=multicohort.analysis_dataset, stage_name=self.name)
+        datestamp: str = datetime.now(tz=timezone.utc).strftime('%Y%m%d')
+        panel_id: str = config_retrieve(['popgen_genotyping', 'references', 'reference_panel', 'panel_id'])
+        base_name = f'{datestamp}_cohort_plus_{panel_id}'
+        return {
+            'pgen': prefix / f'{base_name}.pgen',
+            'pvar': prefix / f'{base_name}.pvar',
+            'psam': prefix / f'{base_name}.psam',
+            'log': prefix / f'{base_name}.log',
+            'stats': prefix / f'{base_name}_variant_intersection_stats.tsv',
+        }
+
+    def queue_jobs(self, multicohort: MultiCohort, inputs: StageInput) -> StageOutput:
+        """
+        Queue the reference-panel merge job for the multi-cohort.
+        """
+        outputs: dict[str, Path] = self.expected_outputs(multicohort=multicohort)
+
+        # Upstream cohort PLINK 1.9 fileset
+        cohort_plink: dict[str, Path] = inputs.as_dict(target=multicohort, stage=MergeCohortPlink)
+
+        # Reference panel + FASTA + assertions from config
+        ref_cfg: dict[str, str] = config_retrieve(['popgen_genotyping', 'references', 'reference_panel'])
+        fasta_ref: str = config_retrieve(['popgen_genotyping', 'references', 'fasta_ref_path'])
+
+        j: BashJob = run_merge_with_reference_panel(
+            cohort_plink_paths={
+                'bed': str(cohort_plink['bed']),
+                'bim': str(cohort_plink['bim']),
+                'fam': str(cohort_plink['fam']),
+            },
+            reference_panel_paths={
+                'bed': ref_cfg['bed_path'],
+                'bim': ref_cfg['bim_path'],
+                'fam': ref_cfg['fam_path'],
+            },
+            fasta_ref_path=fasta_ref,
+            expected_contig_style=ref_cfg['expected_contig_style'],
+            expected_variant_id_pattern=ref_cfg['expected_variant_id_pattern'],
+            output_pgen_prefix=str(outputs['pgen']).removesuffix('.pgen'),
+            output_log_path=str(outputs['log']),
+            output_stats_path=str(outputs['stats']),
+            job_name=f'MergeWithReferencePanel_{multicohort.name}',
         )
 
         return self.make_outputs(multicohort, data=outputs, jobs=[j])
