@@ -42,6 +42,11 @@ cpu = 8
 memory = 'highmem'
 storage = '50G'
 
+[popgen_genotyping.cohort_plink_qc]
+cpu = 2
+memory = 'standard'
+storage = '20G'
+
 [popgen_genotyping.merge_cohort_plink]
 cpu = 4
 memory = 'highmem'

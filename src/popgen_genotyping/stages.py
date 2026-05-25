@@ -13,6 +13,7 @@ from cpg_utils.config import config_retrieve
 from popgen_genotyping.jobs.baf_regress_job import run_bafregress
 from popgen_genotyping.jobs.cohort_bcf_to_plink_job import run_cohort_bcf_to_plink
 from popgen_genotyping.jobs.cohort_cluster_stats_job import run_cohort_cluster_stats
+from popgen_genotyping.jobs.cohort_plink_qc_job import run_cohort_plink_qc
 from popgen_genotyping.jobs.export_cohort_datasets_job import run_export_cohort_datasets
 from popgen_genotyping.jobs.gtc_to_bcfs_job import run_gtc_to_bcfs
 from popgen_genotyping.jobs.king_ibdseg_job import run_king_ibdseg
@@ -209,6 +210,46 @@ class CohortBcfToPlink(CohortStage):
             output_prefix=str(outputs['bed']).replace('.bed', ''),
             sex_mapping=sex_mapping,
             job_name=f'CohortBcfToPlink_{cohort.name}',
+        )
+
+        return self.make_outputs(cohort, data=outputs, jobs=[j])
+
+
+@stage(required_stages=[CohortBcfToPlink], analysis_type='array_cohort_plink_qc', analysis_keys=['log'])
+class CohortPlinkQc(CohortStage):
+    """
+    Per-cohort PLINK2 site-level QC (`--missing` / `--freq` / `--hardy`).
+
+    Sibling of `Plink2Qc` (which runs on the merged PGEN). Output lives in
+    default storage so per-batch metrics persist beyond the cohort's tmp
+    intermediates.
+    """
+
+    def expected_outputs(self, cohort: Cohort) -> dict[str, Path]:
+        """
+        Define the per-cohort PLINK2 QC outputs in default storage.
+        """
+        prefix: Path = get_output_prefix(dataset=cohort.dataset, stage_name=self.name)
+        return {
+            'vmiss': prefix / f'{cohort.id}.vmiss',
+            'afreq': prefix / f'{cohort.id}.afreq',
+            'hardy': prefix / f'{cohort.id}.hardy',
+            'log': prefix / f'{cohort.id}.log',
+        }
+
+    def queue_jobs(self, cohort: Cohort, inputs: StageInput) -> StageOutput:
+        """
+        Queue the per-cohort PLINK2 site-QC job against the cohort PLINK 1.9 fileset.
+        """
+        outputs: dict[str, Path] = self.expected_outputs(cohort)
+
+        bed_path: Path = inputs.as_path(target=cohort, stage=CohortBcfToPlink, key='bed')
+        output_prefix = str(outputs['vmiss']).removesuffix('.vmiss')
+
+        j: BashJob = run_cohort_plink_qc(
+            bed_path=str(bed_path),
+            output_prefix=output_prefix,
+            job_name=f'CohortPlinkQc_{cohort.name}',
         )
 
         return self.make_outputs(cohort, data=outputs, jobs=[j])
