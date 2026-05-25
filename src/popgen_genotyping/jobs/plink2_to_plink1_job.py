@@ -61,7 +61,7 @@ def run_plink2_to_plink1(
     j.command(
         f"""
         set -ex
-        plink2 --pfile {pfile} --make-bed --out {j.output_plink1}
+        plink2 --pfile {pfile} --output-chr chrM --make-bed --out {j.output_plink1}
         """
     )
 

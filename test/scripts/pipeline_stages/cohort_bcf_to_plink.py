@@ -46,7 +46,7 @@ def run_cohort_bcf_to_plink(
 
     plink1_cmd: str = (
         f'bash -c \'plink2 --bcf {light_int} --max-alleles 2 --split-par hg38 --set-all-var-ids "@:#:\\$r:\\$a" '
-        f"--update-sex {sex_int} --allow-extra-chr --make-bed --out {plink1_int}'"
+        f"--update-sex {sex_int} --allow-extra-chr --output-chr chrM --make-bed --out {plink1_int}'"
     )
     run_docker(PLINK_IMAGE, plink1_cmd)
 
