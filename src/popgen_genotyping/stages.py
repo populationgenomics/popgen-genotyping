@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from cpg_flow.stage import CohortStage, MultiCohortStage, stage
-from cpg_utils.config import config_retrieve
+from cpg_utils.config import config_retrieve, reference_path
 
 from popgen_genotyping.jobs.baf_regress_job import run_bafregress
 from popgen_genotyping.jobs.cohort_bcf_to_plink_job import run_cohort_bcf_to_plink
@@ -19,6 +19,7 @@ from popgen_genotyping.jobs.merge_cohort_plink_job import run_merge_plink
 from popgen_genotyping.jobs.plink2_qc_job import run_plink2_qc
 from popgen_genotyping.jobs.plink2_to_plink1_job import run_plink2_to_plink1
 from popgen_genotyping.jobs.qc_report_job import run_qc_report
+from popgen_genotyping.jobs.snp_qc_report_job import run_snp_qc_report
 from popgen_genotyping.metamist_utils import (
     query_reported_sex,
     resolve_cohort_gtc_mapping,
@@ -394,6 +395,73 @@ class KingIbdseg(MultiCohortStage):
         )
 
         return self.make_outputs(multicohort, data=outputs, jobs=[j])
+
+
+@stage(
+    required_stages=[Plink2Qc],
+    analysis_type='array_snp_qc',
+    analysis_keys=['exclusion_list'],
+)
+class SnpQcReport(MultiCohortStage):
+    """
+    Per-SNP QC side-car: vendor cluster scores + call rate + strand-ambiguity.
+
+    Joins the references-repo EGT INFO BCF (``GenTrain_Score`` / ``Cluster_Sep``)
+    with the merged-set ``Plink2Qc`` ``.vmiss`` and applies four thresholds
+    (declared under ``[popgen_genotyping.snp_qc_report.thresholds]``).
+    The PGEN released by ``ExportCohortDatasets`` is **not** filtered in place;
+    downstream ancestry-PCA consumers pass the emitted ``.snplist`` to
+    ``plink2 --extract``/``--exclude``.
+
+    Frequency-based filters are intentionally absent — they correlate with
+    rare ancestry-informative variants we want to retain.
+    """
+
+    def expected_outputs(self, multicohort: MultiCohort) -> dict[str, Path]:
+        """
+        Define the audit TSV, exclusion list, and summary TSV outputs.
+        """
+        prefix: Path = get_output_prefix(dataset=multicohort.analysis_dataset, stage_name=self.name)
+        datestamp: str = datetime.now(tz=timezone.utc).strftime('%Y%m%d')
+        return {
+            'audit_tsv': prefix / f'{datestamp}_snp_qc.audit.tsv.gz',
+            'exclusion_list': prefix / f'{datestamp}_snp_qc.exclude.snplist',
+            'summary_tsv': prefix / f'{datestamp}_snp_qc.summary.tsv',
+        }
+
+    def queue_jobs(self, multicohort: MultiCohort, inputs: StageInput) -> StageOutput:
+        """
+        Queue the EGT-INFO extract + minimal synthesis chain.
+        """
+        outputs: dict[str, Path] = self.expected_outputs(multicohort=multicohort)
+        merged_vmiss_path: Path = inputs.as_path(target=multicohort, stage=Plink2Qc, key='vmiss')
+
+        thresholds_path: list[str] = ['popgen_genotyping', 'snp_qc_report', 'thresholds']
+        gentrain_min: float = config_retrieve([*thresholds_path, 'gentrain_min'], 0.7)
+        cluster_sep_min: float = config_retrieve([*thresholds_path, 'cluster_sep_min'], 0.4)
+        fmiss_max: float = config_retrieve([*thresholds_path, 'fmiss_max'], 0.02)
+        exclude_strand_ambiguous: bool = config_retrieve(
+            [*thresholds_path, 'exclude_strand_ambiguous'],
+            True,
+        )
+
+        jobs: list[BashJob] = run_snp_qc_report(
+            egt_info_bcf_path=reference_path('illumina_microarray/GDA_8v1_0_D1_ClusterFile_egt_info_bcf'),
+            egt_info_bcf_index_path=reference_path(
+                'illumina_microarray/GDA_8v1_0_D1_ClusterFile_egt_info_bcf_index',
+            ),
+            merged_vmiss_path=str(merged_vmiss_path),
+            gentrain_min=gentrain_min,
+            cluster_sep_min=cluster_sep_min,
+            fmiss_max=fmiss_max,
+            exclude_strand_ambiguous=exclude_strand_ambiguous,
+            output_audit_tsv_path=str(outputs['audit_tsv']),
+            output_exclusion_list_path=str(outputs['exclusion_list']),
+            output_summary_tsv_path=str(outputs['summary_tsv']),
+            job_name=f'SnpQcReport_{multicohort.name}',
+        )
+
+        return self.make_outputs(multicohort, data=outputs, jobs=jobs)
 
 
 @stage(required_stages=[Plink2Qc, BafRegress], analysis_type='array_qc_report')

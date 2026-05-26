@@ -15,6 +15,7 @@ graph TD
     MCP --> ECD[ExportCohortDatasets<br/><i>Export to PLINK2/BCF</i>]:::multicohort
     MCP --> KING[KingIbdseg<br/><i>KING --ibdseg Relatedness</i>]:::multicohort
     ECD --> QC[Plink2Qc<br/><i>PLINK2 QC Suite</i>]:::multicohort
+    QC --> SNP[SnpQcReport<br/><i>EGT + Call-Rate + Strand Filter</i>]:::multicohort
     QC --> QR[QcReport<br/><i>Combined QC CSV</i>]:::multicohort
     BAF --> QR
 
@@ -26,5 +27,5 @@ graph TD
 
     %% Explicit classes
     class GtoB,BAF,BtoP cohort;
-    class MCP,ECD,QC,KING,QR multicohort;
+    class MCP,ECD,QC,KING,QR,SNP multicohort;
     class P2P1 conditional;
