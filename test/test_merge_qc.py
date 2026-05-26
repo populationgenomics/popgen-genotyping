@@ -113,23 +113,23 @@ class TestProcessSeg:
         parent_row = result[result['IID'] == 'Parent'].iloc[0]
         assert 'Child:0.25:PO' in parent_row['RELATED_1ST']
 
-    def test_unknown_inftype_skipped(self, tmp_dir: Path) -> None:
-        """Pairs with an unrecognised InfType (e.g. UN) are dropped."""
+    def test_unknown_inftype_raises(self, tmp_dir: Path) -> None:
+        """Unrecognised InfType values raise ValueError."""
         path = _write(
             tmp_dir / 'unknown.seg',
             _SEG_HEADER + 'F\tS1\tF\tS2\t0.0100\t0.0000\t0.0050\tUN\n',
         )
-        result = process_seg(path)
-        assert result.empty
+        with pytest.raises(ValueError, match='unrecognised InfType'):
+            process_seg(path)
 
-    def test_missing_columns(self, tmp_dir: Path) -> None:
-        """Return empty DataFrame when required columns are missing."""
+    def test_missing_columns_raises(self, tmp_dir: Path) -> None:
+        """Missing required columns raise ValueError."""
         path = _write(
             tmp_dir / 'bad.seg',
             'COL_A\tCOL_B\nX\tY\n',
         )
-        result = process_seg(path)
-        assert result.empty
+        with pytest.raises(ValueError, match='missing required column'):
+            process_seg(path)
 
     def test_empty_seg(self, tmp_dir: Path) -> None:
         """Return empty DataFrame for a header-only .seg file."""

@@ -42,8 +42,8 @@ def process_seg(seg_path: str) -> pd.DataFrame:
     Each degree column contains semicolon-separated ``REL_ID:KINSHIP:INFTYPE``
     strings. Kinship is the IBD-based KING kinship coefficient
     ``IBD1Seg/4 + IBD2Seg/2`` (equivalent to ``PropIBD/2``). InfType is KING's
-    relationship inference (``PO``, ``FS``, ``2nd``, ``3rd``, ``Dup/MZ``); pairs
-    with an unrecognised InfType are skipped.
+    relationship inference (``PO``, ``FS``, ``2nd``, ``3rd``, ``Dup/MZ``); any
+    InfType not in that set raises ``ValueError``.
 
     Args:
         seg_path: Path to the autosomal ``.seg`` file emitted by KING
@@ -52,6 +52,10 @@ def process_seg(seg_path: str) -> pd.DataFrame:
     Returns:
         DataFrame with IID and RELATED_MZ/1ST/2ND/3RD columns, or an empty
         DataFrame with those columns if no relationships are found.
+
+    Raises:
+        ValueError: If the ``.seg`` file is missing any of the required
+            columns or contains an unrecognised ``InfType``.
     """
     empty = pd.DataFrame(columns=['IID', *DEGREE_COLS])
 
@@ -60,17 +64,23 @@ def process_seg(seg_path: str) -> pd.DataFrame:
         return empty
 
     required = {'ID1', 'ID2', 'IBD1Seg', 'IBD2Seg', 'InfType'}
-    if not required.issubset(seg_df.columns):
-        print(
-            'Warning: Expected ID1, ID2, IBD1Seg, IBD2Seg, and InfType columns in .seg file but column(s) not found.',
+    missing = required - set(seg_df.columns)
+    if missing:
+        raise ValueError(
+            f'.seg file {seg_path} is missing required column(s): {sorted(missing)}',
         )
-        return empty
+
+    unknown = set(seg_df['InfType']) - set(INFTYPE_TO_DEGREE)
+    if unknown:
+        raise ValueError(
+            f'.seg file {seg_path} contains unrecognised InfType value(s): {sorted(unknown)}. '
+            f'Expected one of {sorted(INFTYPE_TO_DEGREE)}.',
+        )
 
     seg_df = seg_df.assign(
         KINSHIP=(seg_df['IBD1Seg'].astype(float) / 4.0 + seg_df['IBD2Seg'].astype(float) / 2.0).round(4),
         DEGREE=seg_df['InfType'].map(INFTYPE_TO_DEGREE),
     )
-    seg_df = seg_df[seg_df['DEGREE'].notna()]
     if seg_df.empty:
         return empty
 
@@ -163,17 +173,11 @@ def main() -> None:
     merged = smiss.merge(het, on=merge_cols, suffixes=('', '_het'))
     merged = merged.merge(sexcheck, on=merge_cols, suffixes=('', '_sex'))
 
-    # Process KING IBD-segment relatedness
-    try:
-        seg_pivoted = process_seg(args.seg)
-        merged = merged.merge(seg_pivoted, on='IID', how='left')
-    except (OSError, ValueError, KeyError) as e:
-        print(f'Warning: Could not process .seg file: {e}')
-
-    # Ensure degree columns exist even if processing was skipped
-    for col in DEGREE_COLS:
-        if col not in merged.columns:
-            merged[col] = pd.NA
+    # Process KING IBD-segment relatedness. Errors from process_seg propagate
+    # so the Batch job fails fast on a malformed .seg rather than emitting a
+    # silently-incomplete QC report.
+    seg_pivoted = process_seg(args.seg)
+    merged = merged.merge(seg_pivoted, on='IID', how='left')
 
     # Process bafregress files
     if args.bafregress:
