@@ -1,16 +1,10 @@
-"""Minimal per-SNP QC synthesis for the genotyping pipeline.
+"""Per-SNP QC filter for the genotyping pipeline.
 
-Joins the Illumina EGT INFO TSV (extracted from the references-repo sample-less
-BCF) with the merged-set ``plink2 --missing`` per-variant output, applies four
-threshold filters, and emits a side-car exclusion ``.snplist``. Downstream
-ancestry-PCA consumers pass the list to ``plink2 --extract``/``--exclude``;
-the released PGEN is not filtered in place.
-
-The filters are deliberately minimal for ancestry use: vendor cluster-quality
-scores plus call rate, optionally dropping ``{A,T}``/``{C,G}`` SNPs that
-cannot be strand-resolved against a WGS reference. Frequency-based filters
-are intentionally absent (they correlate with rare ancestry-informative
-variants we want to retain).
+Joins the Illumina EGT INFO TSV (extracted from the references-repo
+sample-less BCF) with the merged-set ``plink2 --missing`` per-variant output,
+applies four threshold filters (``GenTrain_Score``, ``Cluster_Sep``,
+``F_MISS``, and an optional ``{A,T}``/``{C,G}`` strand-ambiguity drop), and
+emits an exclusion ``.snplist`` plus an audit TSV and per-filter summary.
 """
 
 from __future__ import annotations
@@ -217,7 +211,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Run the synthesis end-to-end.
+    """Load the inputs, apply filters, and write the outputs.
 
     Args:
         argv: Optional override of ``sys.argv[1:]`` for testing.

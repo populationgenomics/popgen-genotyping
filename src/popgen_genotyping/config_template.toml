@@ -70,12 +70,11 @@ memory = 'standard'
 storage = '10G'
 
 [popgen_genotyping.snp_qc_report.thresholds]
-# Vendor-curated EGT scores from the references-repo sidecar BCF.
 gentrain_min = 0.7
 cluster_sep_min = 0.4
-# Merged-set call-rate filter (F_MISS = 1 - call rate).
+# F_MISS = 1 - call rate.
 fmiss_max = 0.02
-# Drop {A,T}/{C,G} SNPs that cannot be strand-resolved against a WGS reference.
+# Drop {A,T}/{C,G} SNPs (complementary alleles, cannot be strand-resolved).
 exclude_strand_ambiguous = true
 
 [popgen_genotyping.qc_report]

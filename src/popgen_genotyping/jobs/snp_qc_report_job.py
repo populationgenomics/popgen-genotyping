@@ -53,7 +53,7 @@ def run_snp_qc_report(
         output_audit_tsv_path: Output path for the bgzipped audit TSV.
         output_exclusion_list_path: Output path for the exclusion ``.snplist``.
         output_summary_tsv_path: Output path for the summary TSV.
-        job_name: Display name for the synthesis job (the extract job appends
+        job_name: Display name for the filter job (the extract job appends
             an ``_extract_egt_info`` suffix).
 
     Returns:

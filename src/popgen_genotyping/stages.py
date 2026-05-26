@@ -404,17 +404,13 @@ class KingIbdseg(MultiCohortStage):
 )
 class SnpQcReport(MultiCohortStage):
     """
-    Per-SNP QC side-car: vendor cluster scores + call rate + strand-ambiguity.
+    Per-SNP QC: vendor cluster scores + call rate + strand-ambiguity filter.
 
     Joins the references-repo EGT INFO BCF (``GenTrain_Score`` / ``Cluster_Sep``)
-    with the merged-set ``Plink2Qc`` ``.vmiss`` and applies four thresholds
-    (declared under ``[popgen_genotyping.snp_qc_report.thresholds]``).
-    The PGEN released by ``ExportCohortDatasets`` is **not** filtered in place;
-    downstream ancestry-PCA consumers pass the emitted ``.snplist`` to
-    ``plink2 --extract``/``--exclude``.
-
-    Frequency-based filters are intentionally absent — they correlate with
-    rare ancestry-informative variants we want to retain.
+    with the merged-set ``Plink2Qc`` ``.vmiss`` and applies the thresholds
+    declared under ``[popgen_genotyping.snp_qc_report.thresholds]``. Emits an
+    audit TSV, an exclusion ``.snplist`` (failed variant IDs), and a per-filter
+    summary TSV. The PGEN released by ``ExportCohortDatasets`` is not modified.
     """
 
     def expected_outputs(self, multicohort: MultiCohort) -> dict[str, Path]:
@@ -431,7 +427,7 @@ class SnpQcReport(MultiCohortStage):
 
     def queue_jobs(self, multicohort: MultiCohort, inputs: StageInput) -> StageOutput:
         """
-        Queue the EGT-INFO extract + minimal synthesis chain.
+        Queue the EGT-INFO extract + filter jobs.
         """
         outputs: dict[str, Path] = self.expected_outputs(multicohort=multicohort)
         merged_vmiss_path: Path = inputs.as_path(target=multicohort, stage=Plink2Qc, key='vmiss')
