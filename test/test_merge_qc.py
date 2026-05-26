@@ -9,10 +9,10 @@ import pytest
 
 from popgen_genotyping.scripts.merge_qc import (
     DEGREE_COLS,
-    get_degree,
+    INFTYPE_TO_DEGREE,
     main,
     process_bafregress,
-    process_kinship,
+    process_seg,
     read_qc_file,
 )
 
@@ -30,6 +30,9 @@ def _write(path: Path, text: str) -> str:
     """Write text to a file and return its string path."""
     path.write_text(text)
     return str(path)
+
+
+_SEG_HEADER = 'FID1\tID1\tFID2\tID2\tIBD1Seg\tIBD2Seg\tPropIBD\tInfType\n'
 
 
 # -- read_qc_file -------------------------------------------------------------
@@ -56,93 +59,94 @@ class TestReadQcFile:
         assert list(df.columns) == ['IID', 'METRIC']
 
 
-# -- get_degree ----------------------------------------------------------------
+# -- INFTYPE_TO_DEGREE ---------------------------------------------------------
 
 
-class TestGetDegree:
-    """Tests for get_degree."""
+class TestInftypeToDegree:
+    """Tests for the InfType → RELATED_* mapping."""
 
-    def test_mz(self) -> None:
-        """Kinship >= 0.354 is MZ."""
-        assert get_degree(0.5) == 'RELATED_MZ'
-        assert get_degree(0.354) == 'RELATED_MZ'
+    def test_known_inftypes(self) -> None:
+        """KING --ibdseg InfType values bin into the expected degree columns."""
+        assert INFTYPE_TO_DEGREE['Dup/MZ'] == 'RELATED_MZ'
+        assert INFTYPE_TO_DEGREE['PO'] == 'RELATED_1ST'
+        assert INFTYPE_TO_DEGREE['FS'] == 'RELATED_1ST'
+        assert INFTYPE_TO_DEGREE['2nd'] == 'RELATED_2ND'
+        assert INFTYPE_TO_DEGREE['3rd'] == 'RELATED_3RD'
 
-    def test_first_degree(self) -> None:
-        """Kinship >= 0.177 and < 0.354 is 1st degree."""
-        assert get_degree(0.25) == 'RELATED_1ST'
-        assert get_degree(0.177) == 'RELATED_1ST'
-
-    def test_second_degree(self) -> None:
-        """Kinship >= 0.0884 and < 0.177 is 2nd degree."""
-        assert get_degree(0.125) == 'RELATED_2ND'
-        assert get_degree(0.0884) == 'RELATED_2ND'
-
-    def test_third_degree(self) -> None:
-        """Kinship >= 0.0442 and < 0.0884 is 3rd degree."""
-        assert get_degree(0.06) == 'RELATED_3RD'
-        assert get_degree(0.0442) == 'RELATED_3RD'
-
-    def test_below_threshold(self) -> None:
-        """Kinship below 0.0442 returns None."""
-        assert get_degree(0.01) is None
+    def test_unknown_inftype(self) -> None:
+        """Unknown InfType values (e.g. 4th, UN) are not in the mapping."""
+        assert '4th' not in INFTYPE_TO_DEGREE
+        assert 'UN' not in INFTYPE_TO_DEGREE
 
 
-# -- process_kinship -----------------------------------------------------------
+# -- process_seg ---------------------------------------------------------------
 
 
-class TestProcessKinship:
-    """Tests for process_kinship."""
+class TestProcessSeg:
+    """Tests for process_seg."""
 
-    def test_basic_kinship(self, tmp_dir: Path) -> None:
-        """Process a .kin0 file with one related pair."""
+    def test_basic_pair(self, tmp_dir: Path) -> None:
+        """Process a .seg file with one full-sib pair."""
+        # Full sibs: IBD1Seg ≈ 0.5, IBD2Seg ≈ 0.25 → kinship = 0.5/4 + 0.25/2 = 0.25
         path = _write(
-            tmp_dir / 'test.kin0',
-            '#IID1\tIID2\tKINSHIP\tIBS0\nS1\tS2\t0.25\t0.01\n',
+            tmp_dir / 'test.seg',
+            _SEG_HEADER + 'F\tS1\tF\tS2\t0.5000\t0.2500\t0.7500\tFS\n',
         )
-        result = process_kinship(path)
+        result = process_seg(path)
         assert isinstance(result, pd.DataFrame)
         assert set(DEGREE_COLS).issubset(result.columns)
 
         s1_row = result[result['IID'] == 'S1'].iloc[0]
-        assert 'S2:0.25:0.01' in s1_row['RELATED_1ST']
+        assert 'S2:0.25:FS' in s1_row['RELATED_1ST']
 
         s2_row = result[result['IID'] == 'S2'].iloc[0]
-        assert 'S1:0.25:0.01' in s2_row['RELATED_1ST']
+        assert 'S1:0.25:FS' in s2_row['RELATED_1ST']
 
-    def test_filters_below_threshold(self, tmp_dir: Path) -> None:
-        """Pairs below 3rd degree threshold are excluded."""
+    def test_parent_offspring(self, tmp_dir: Path) -> None:
+        """PO pairs land in RELATED_1ST and carry InfType=PO."""
+        # PO: IBD1Seg ≈ 1.0, IBD2Seg ≈ 0 → kinship = 0.25
         path = _write(
-            tmp_dir / 'low.kin0',
-            '#IID1\tIID2\tKINSHIP\tIBS0\nS1\tS2\t0.01\t0.5\n',
+            tmp_dir / 'po.seg',
+            _SEG_HEADER + 'F\tParent\tF\tChild\t1.0000\t0.0000\t0.5000\tPO\n',
         )
-        result = process_kinship(path)
+        result = process_seg(path)
+        parent_row = result[result['IID'] == 'Parent'].iloc[0]
+        assert 'Child:0.25:PO' in parent_row['RELATED_1ST']
+
+    def test_unknown_inftype_skipped(self, tmp_dir: Path) -> None:
+        """Pairs with an unrecognised InfType (e.g. UN) are dropped."""
+        path = _write(
+            tmp_dir / 'unknown.seg',
+            _SEG_HEADER + 'F\tS1\tF\tS2\t0.0100\t0.0000\t0.0050\tUN\n',
+        )
+        result = process_seg(path)
         assert result.empty
 
     def test_missing_columns(self, tmp_dir: Path) -> None:
         """Return empty DataFrame when required columns are missing."""
         path = _write(
-            tmp_dir / 'bad.kin0',
+            tmp_dir / 'bad.seg',
             'COL_A\tCOL_B\nX\tY\n',
         )
-        result = process_kinship(path)
+        result = process_seg(path)
         assert result.empty
 
-    def test_empty_kin0(self, tmp_dir: Path) -> None:
-        """Return empty DataFrame for a header-only .kin0 file."""
-        path = _write(tmp_dir / 'empty.kin0', '#IID1\tIID2\tKINSHIP\tIBS0\n')
-        result = process_kinship(path)
+    def test_empty_seg(self, tmp_dir: Path) -> None:
+        """Return empty DataFrame for a header-only .seg file."""
+        path = _write(tmp_dir / 'empty.seg', _SEG_HEADER)
+        result = process_seg(path)
         assert result.empty
 
     def test_multiple_degrees(self, tmp_dir: Path) -> None:
         """A sample with relationships at different degrees gets separate columns."""
         path = _write(
-            tmp_dir / 'multi.kin0',
-            '#IID1\tIID2\tKINSHIP\tIBS0\nS1\tS2\t0.25\t0.01\nS1\tS3\t0.06\t0.1\n',
+            tmp_dir / 'multi.seg',
+            _SEG_HEADER + 'F\tS1\tF\tS2\t0.5000\t0.2500\t0.7500\tFS\n' + 'F\tS1\tF\tS3\t0.1800\t0.0000\t0.0900\t3rd\n',
         )
-        result = process_kinship(path)
+        result = process_seg(path)
         s1_row = result[result['IID'] == 'S1'].iloc[0]
-        assert 'S2:0.25:0.01' in s1_row['RELATED_1ST']
-        assert 'S3:0.06:0.1' in s1_row['RELATED_3RD']
+        assert 'S2:0.25:FS' in s1_row['RELATED_1ST']
+        assert 'S3:0.045:3rd' in s1_row['RELATED_3RD']
 
 
 # -- process_bafregress --------------------------------------------------------
@@ -200,9 +204,9 @@ class TestEndToEnd:
             tmp_dir / 'test.sexcheck',
             '#FID\tIID\tPEDSEX\tSNPSEX\tSTATUS\tF\nFAM1\tS1\t1\t1\tOK\t0.99\nFAM2\tS2\t2\t2\tOK\t0.01\n',
         )
-        kin0_path = _write(
-            tmp_dir / 'test.kin0',
-            '#IID1\tIID2\tKINSHIP\tIBS0\nS1\tS2\t0.25\t0.01\n',
+        seg_path = _write(
+            tmp_dir / 'test.seg',
+            _SEG_HEADER + 'FAM1\tS1\tFAM2\tS2\t0.5000\t0.2500\t0.7500\tFS\n',
         )
         baf_path = _write(
             tmp_dir / 'baf.txt',
@@ -219,8 +223,8 @@ class TestEndToEnd:
             het_path,
             '--sexcheck',
             sexcheck_path,
-            '--kin0',
-            kin0_path,
+            '--seg',
+            seg_path,
             '--output',
             output_path,
             '--bafregress',
@@ -243,12 +247,12 @@ class TestEndToEnd:
         assert rows[0]['IID'] == 'S1'
         assert rows[1]['IID'] == 'S2'
 
-        # Check kinship columns present
+        # Check degree columns present
         for col in DEGREE_COLS:
             assert col in rows[0]
 
-        # S1 should have a 1st degree relationship with S2
-        assert 'S2' in rows[0]['RELATED_1ST']
+        # S1 should have a 1st degree FS relationship with S2
+        assert 'S2:0.25:FS' in rows[0]['RELATED_1ST']
 
         # Bafregress data should be merged
         assert 'LRR_mean' in rows[0]
