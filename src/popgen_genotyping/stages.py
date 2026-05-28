@@ -402,17 +402,12 @@ class KingIbdseg(MultiCohortStage):
 )
 class MergeWithReferencePanel(MultiCohortStage):
     """
-    Merge a config-pointed cohort PLINK2 aggregate with an external reference panel.
+    Merge a cohort PLINK2 aggregate with an external reference panel.
 
-    This stage has no cpg-flow `required_stages` — it is deliberately
-    standalone, so an analysis-runner invocation with
-    `only_stages=['MergeWithReferencePanel']` can produce a reference-panel
-    merge against any historical `ExportCohortDatasets` output without
-    re-running the upstream pipeline. Both the cohort PGEN/PVAR/PSAM and the
-    reference panel BED/BIM/FAM are pointed at by config blocks under
-    `[popgen_genotyping.references.*]`. The cohort PGEN is round-tripped to
-    PLINK 1.9 inside the merge job, then normalized against the configured
-    FASTA before merging.
+    No `required_stages`: cohort PGEN/PVAR/PSAM and reference BED/BIM/FAM
+    paths are read from `[popgen_genotyping.references.*]`, so
+    `only_stages=['MergeWithReferencePanel']` can target any existing
+    `ExportCohortDatasets` output.
     """
 
     def expected_outputs(self, multicohort: MultiCohort) -> dict[str, Path]:

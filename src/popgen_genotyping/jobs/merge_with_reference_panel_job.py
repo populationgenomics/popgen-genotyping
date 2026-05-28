@@ -29,30 +29,23 @@ def run_merge_with_reference_panel(
     """
     Merge a cohort PLINK2 aggregate with an external reference panel.
 
-    The cohort PGEN/PVAR/PSAM is first round-tripped to PLINK 1.9 (the merge
-    pipeline operates in PLINK 1.9 throughout), then normalized against the
-    supplied FASTA reference: REF is set authoritatively from the FASTA (so
-    A1=ALT/A2=REF regardless of any upstream allele-frequency swap), variant
-    IDs are re-derived as `chr:pos:ref:alt`, and contigs are re-prefixed with
-    `chr` to match the reference panel's convention. Conventions are then
-    asserted against config expectations. The per-locus intersect is computed
-    inline as an awk ID hash on the two BIMs; both sides are pre-filtered to
-    that intersect via `plink --extract` before a single `plink --bmerge
-    --keep-allele-order`. Because both BIMs use the FASTA-anchored
-    `chr:pos:ref:alt` ID scheme, an ID match implies an allele match — the
-    intersect eliminates the `.missnp` class of conflicts. Final output is
-    PLINK2.
+    Cohort PGEN is round-tripped to PLINK 1.9, then FASTA-anchored
+    (`--ref-from-fa force`), restricted to bi-allelic ACGT SNPs, and given
+    `chr:pos:ref:alt` variant IDs. Contig style and variant-ID pattern are
+    asserted against config on both sides. The intersect is computed by ID
+    hash across the two BIMs; both sides are pre-filtered with
+    `plink --extract` and joined with a single `plink --bmerge`. Final
+    output is PLINK2.
 
     Args:
-        cohort_pgen_paths (dict[str, str]): Cloud paths for the merged-cohort
-            PLINK2 fileset (`pgen`, `pvar`, `psam`). Typically the output of a
-            prior `ExportCohortDatasets` run, pointed at by config.
-        reference_panel_paths (dict[str, str]): Cloud paths for the reference
-            panel PLINK 1.9 fileset (`bed`, `bim`, `fam`).
-        fasta_ref_path (str): Cloud path to the GRCh38 FASTA (its `.fai` is
-            expected at `<fasta_ref_path>.fai`).
-        expected_contig_style (str): `'with_chr'` or `'no_chr'`. Both reference
-            and post-normalization cohort BIMs are asserted to match.
+        cohort_pgen_paths (dict[str, str]): Cohort PLINK2 fileset paths
+            (`pgen`, `pvar`, `psam`).
+        reference_panel_paths (dict[str, str]): Reference panel PLINK 1.9
+            fileset paths (`bed`, `bim`, `fam`).
+        fasta_ref_path (str): GRCh38 FASTA path; `.fai` expected at
+            `<fasta_ref_path>.fai`.
+        expected_contig_style (str): `'with_chr'` or `'no_chr'`. Asserted on
+            both BIMs.
         expected_variant_id_pattern (str): Extended regex (egrep) matching
             permitted variant IDs. Asserted on the first 100 rows of each side.
         output_pgen_prefix (str): Cloud prefix for the merged PLINK2 fileset
@@ -74,7 +67,6 @@ def run_merge_with_reference_panel(
         default_storage='100G',
     )
 
-    # 1. Stage inputs
     cohort_input = b.read_input_group(
         pgen=cohort_pgen_paths['pgen'],
         pvar=cohort_pgen_paths['pvar'],
@@ -90,7 +82,6 @@ def run_merge_with_reference_panel(
         fai=fasta_ref_path + '.fai',
     )
 
-    # 2. Declare output resource groups
     j.declare_resource_group(
         merged_pgen={
             'pgen': '{root}.pgen',
@@ -101,36 +92,24 @@ def run_merge_with_reference_panel(
         stats={'tsv': '{root}.tsv'},
     )
 
-    # 3. Build the combined command
-    # ConvertCohortToPlink1, NormalizeCohort, ValidateAgainstExpectations,
-    # ComputeIntersect, Merge, ConvertToPlink2, Stats - all in one BashJob
-    # with `set -e`.
     j.command(
         f"""
         set -ex
 
         # ---- ConvertCohortToPlink1 -------------------------------------------
-        # Round-trip the cohort PGEN/PVAR/PSAM to PLINK 1.9 BED/BIM/FAM. The
-        # rest of the merge pipeline operates in PLINK 1.9 (the reference panel
-        # is distributed as PLINK 1.9), and the next step re-anchors REF/ALT
-        # against the FASTA anyway — so we don't need to preserve PGEN's native
-        # orientation through the round-trip.
+        # PGEN → PLINK 1.9. The rest of the merge runs in PLINK 1.9, and
+        # NormalizeCohort re-anchors REF/ALT, so no need to preserve PGEN's
+        # native orientation.
         plink2 --pfile {cohort_input} \\
             --allow-extra-chr \\
             --make-bed --out cohort_plink1
 
         # ---- NormalizeCohort -------------------------------------------------
-        # Pass 1: anchor REF against the FASTA, restrict to bi-allelic ACGT SNPs,
-        # re-derive variant IDs as chr:pos:ref:alt, re-prefix contigs.
-        #
-        # `--ref-from-fa force` makes the FASTA authoritative for REF at every
-        # site, neutralizing any upstream A1/A2 frequency swaps (e.g. the
-        # PLINK 1.9 `--make-bed` minor-allele rotation) before the merge.
-        # `--set-all-var-ids` re-derives every ID from the FASTA-anchored
-        # orientation, so stale IDs from a frequency-swapped upstream are
-        # overwritten with the correct `chr:pos:ref:alt`.
-        # `--snps-only just-acgt` drops indels and non-ACGT alleles; the
-        # reference panel is bi-allelic SNPs only, so anything else is noise.
+        # Pass 1: anchor REF against the FASTA, restrict to bi-allelic ACGT
+        # SNPs, re-derive variant IDs as chr:pos:ref:alt. `--ref-from-fa force`
+        # makes the FASTA authoritative for REF regardless of the cohort BIM's
+        # A1/A2 orientation; `--set-all-var-ids` rewrites IDs from that
+        # FASTA-anchored orientation.
         plink2 --bfile cohort_plink1 \\
             --fa {fasta_file.base} --ref-from-fa force \\
             --set-all-var-ids '@:#:$r:$a' \\
@@ -142,11 +121,10 @@ def run_merge_with_reference_panel(
             --make-bed --out normalized_cohort_pre_dedup
 
         # Pass 2: drop every variant at any position with more than one record.
-        # `--rm-dup` keys off variant IDs and would not catch e.g. (A,C) and
-        # (A,T) at the same coordinate, which still confuses the merge step.
-        # awk identifies positions with multiple records and emits the IDs of
-        # *all* of them so the next `--exclude` removes the whole group
-        # (keeping none, per the merge contract).
+        # `--rm-dup` keys off variant IDs and would miss e.g. (A,C) and (A,T)
+        # at the same coordinate, both of which break `plink --bmerge`. awk
+        # keys off chr+pos and emits every ID at any duplicated position so
+        # the next `--exclude` removes the whole group.
         awk 'NR==FNR {{count[$1"\\t"$4]++; next}} count[$1"\\t"$4] > 1 {{print $2}}' \\
             normalized_cohort_pre_dedup.bim normalized_cohort_pre_dedup.bim \\
             > duplicate_position_var_ids.txt
@@ -177,16 +155,13 @@ def run_merge_with_reference_panel(
         fi
 
         # ---- ComputeIntersect ------------------------------------------------
-        # Build the per-locus extract list as the intersection of variant IDs.
-        # Both BIMs use the FASTA-anchored chr:pos:ref:alt ID scheme (asserted
-        # above), so an ID match implies an allele match — pre-filtering by
-        # this list eliminates the .missnp class of merge conflicts and makes
-        # a retry path unnecessary.
+        # Intersect the two BIMs by variant ID. Both sides use the
+        # FASTA-anchored chr:pos:ref:alt ID scheme (asserted above), so an
+        # ID match implies an allele match; pre-filtering to the intersect
+        # avoids allele-set conflicts in `plink --bmerge`.
         awk 'NR==FNR {{ref[$2]=1; next}} ($2 in ref) {{print $2}}' \\
             {reference_input.bim} normalized_cohort.bim > common.ids
 
-        # Fail fast on a fully-disjoint panel: bmerge on empty filesets would
-        # abort downstream with a less informative error.
         if [ ! -s common.ids ]; then
             echo "no variants in common between normalized cohort and reference panel" >&2
             exit 1
@@ -235,7 +210,6 @@ def run_merge_with_reference_panel(
         """
     )
 
-    # 4. Write outputs back to cloud
     b.write_output(j.merged_pgen, output_pgen_prefix)
     b.write_output(j.merge_log.log, output_log_path)
     b.write_output(j.stats.tsv, output_stats_path)

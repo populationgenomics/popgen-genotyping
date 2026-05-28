@@ -76,25 +76,20 @@ egt_cluster_path = 'gs://...'
 # Optional: population allele frequency reference for BAFRegress
 # af_ref_path = 'gs://...'
 
-# Cohort PLINK2 aggregate consumed by MergeWithReferencePanel. Typically the
-# PGEN/PVAR/PSAM triplet produced by a prior `ExportCohortDatasets` run.
-# MergeWithReferencePanel has no cpg-flow required_stages — it reads these
-# paths directly from config, so any historical aggregate can be targeted
-# without re-running the upstream pipeline.
+# Cohort PLINK2 aggregate consumed by MergeWithReferencePanel — typically a
+# prior ExportCohortDatasets output.
 [popgen_genotyping.references.cohort_aggregate]
 pgen_path = 'gs://cpg-<dataset>-main/<sequencing_subdir>/popgen_genotyping/ExportCohortDatasets/<version>/<datestamp>_cohort.pgen'
 pvar_path = 'gs://cpg-<dataset>-main/<sequencing_subdir>/popgen_genotyping/ExportCohortDatasets/<version>/<datestamp>_cohort.pvar'
 psam_path = 'gs://cpg-<dataset>-main/<sequencing_subdir>/popgen_genotyping/ExportCohortDatasets/<version>/<datestamp>_cohort.psam'
 
-# External reference panel (PLINK 1.9 fileset, pre-built upstream) consumed by
-# MergeWithReferencePanel. The references repo owns producing this artifact;
-# see https://github.com/populationgenomics/references for the source-of-truth.
+# Reference panel (PLINK 1.9 fileset).
 [popgen_genotyping.references.reference_panel]
 bed_path = 'gs://cpg-common-main/references/hgdp_1kg_v3.1.2/ref.bed'
 bim_path = 'gs://cpg-common-main/references/hgdp_1kg_v3.1.2/ref.bim'
 fam_path = 'gs://cpg-common-main/references/hgdp_1kg_v3.1.2/ref.fam'
 panel_id = 'hgdp_1kg_v3.1.2'
-# 'with_chr' (chr1..chrX) or 'no_chr' (1..X). The cohort is renamed to match.
+# 'with_chr' (chr1..chrX) or 'no_chr' (1..X). Both BIMs are asserted to match.
 expected_contig_style = 'with_chr'
-# Extended regex (egrep) matching permitted variant IDs on both sides.
+# Extended regex (egrep) for permitted variant IDs. Asserted on both BIMs.
 expected_variant_id_pattern = '^chr[0-9XYM]+:[0-9]+:[ACGT]+:[ACGT]+$'

@@ -61,27 +61,22 @@ class TestRunMergeWithReferencePanelCommand:
     def test_convert_step_round_trips_cohort_pgen_to_plink1(self) -> None:
         """ConvertCohortToPlink1 produces a `cohort_plink1` BED/BIM/FAM via `plink2 --pfile`.
 
-        The rest of the merge pipeline (normalize, validate, intersect, merge)
-        operates in PLINK 1.9 and consumes `cohort_plink1` as its starting
-        fileset, so this round-trip is the contract between the stage's
-        config-pointed PGEN input and the existing PLINK 1.9 flow.
+        The normalize, validate, intersect and merge steps run in PLINK 1.9
+        and consume `cohort_plink1`.
         """
         cmd: str = _capture_merge_with_reference_panel_command()
         convert_section = cmd.split('ConvertCohortToPlink1')[1].split('NormalizeCohort')[0]
         assert '--pfile' in convert_section
         assert '--make-bed' in convert_section
         assert '--out cohort_plink1' in convert_section
-        # The downstream normalize step reads from `cohort_plink1`.
         normalize_section = cmd.split('NormalizeCohort')[1].split('ValidateAgainstExpectations')[0]
         assert '--bfile cohort_plink1' in normalize_section
 
     def test_normalize_step_uses_fasta_anchored_ref(self) -> None:
-        """NormalizeCohort must set REF authoritatively from the FASTA.
+        """NormalizeCohort sets REF authoritatively from the FASTA.
 
-        Without `--ref-from-fa force`, the cohort's BIM A1/A2 orientation
-        depends on whatever the upstream produced (subject to the rolling-
-        aggregate allele-swap bug). Anchoring against the FASTA is what
-        makes this stage robust regardless of #28's merge status.
+        Anchoring REF against the FASTA decouples this stage from any
+        upstream A1/A2 orientation in the cohort BIM.
         """
         cmd: str = _capture_merge_with_reference_panel_command()
         normalize_section = cmd.split('NormalizeCohort')[1].split('ValidateAgainstExpectations')[0]
@@ -104,23 +99,18 @@ class TestRunMergeWithReferencePanelCommand:
     def test_normalize_step_drops_all_variants_at_duplicate_positions(self) -> None:
         """Every variant at any position with >1 record is excluded (keeping none).
 
-        `--rm-dup` would only catch identical variant IDs; e.g. (A,C) and
+        `--rm-dup` only matches identical variant IDs, so e.g. (A,C) and
         (A,T) at the same coordinate both survive `--rm-dup` but would
-        confuse `plink --bmerge` downstream. The awk pass keys off chr+pos
-        and emits *all* IDs at any duplicated position so the subsequent
-        `--exclude` removes the whole group.
+        break `plink --bmerge`. The awk pass keys off chr+pos and emits
+        every ID at any duplicated position.
         """
         cmd: str = _capture_merge_with_reference_panel_command()
         normalize_section = cmd.split('NormalizeCohort')[1].split('ValidateAgainstExpectations')[0]
-        # Stage-1 output, awk dedup, stage-2 plink2 with --exclude
         assert '--out normalized_cohort_pre_dedup' in normalize_section
         assert 'duplicate_position_var_ids.txt' in normalize_section
-        # The awk must reference $1 (chr) and $4 (bp) of the BIM and emit
-        # IDs only when the chr+bp count is >1.
         assert 'count[$1' in normalize_section
         assert '$4' in normalize_section
         assert 'count[$1' in normalize_section and '> 1' in normalize_section
-        # Final exclude pass produces the dedup'd normalized_cohort
         assert '--exclude duplicate_position_var_ids.txt' in normalize_section
         assert '--out normalized_cohort' in normalize_section
 
@@ -139,9 +129,9 @@ class TestRunMergeWithReferencePanelCommand:
     def test_intersect_step_builds_common_ids_via_awk_id_hash(self) -> None:
         """Common-ID list is computed by awk hash on the variant-ID column ($2) of both BIMs.
 
-        Both BIMs use the FASTA-anchored `chr:pos:ref:alt` ID scheme (the
-        validate step asserts this), so an ID match implies an allele match —
-        the intersect makes the legacy `.missnp` retry path dead code.
+        Both BIMs use the FASTA-anchored `chr:pos:ref:alt` ID scheme, so an
+        ID match implies an allele match — pre-filtering to the intersect
+        keeps `plink --bmerge` conflict-free without a retry path.
         """
         cmd: str = _capture_merge_with_reference_panel_command()
         intersect_section = cmd.split('ComputeIntersect')[1].split('# ---- Merge')[0]
@@ -151,12 +141,7 @@ class TestRunMergeWithReferencePanelCommand:
         assert 'common.ids' in intersect_section
 
     def test_intersect_step_fails_fast_on_empty_common_ids(self) -> None:
-        """A fully-disjoint panel triggers an explicit non-zero exit before bmerge.
-
-        Without this guard, `plink --extract` on an empty list produces an
-        empty fileset and `--bmerge` fails downstream with a less informative
-        error. We surface the disjoint-panel case directly.
-        """
+        """A fully-disjoint panel exits non-zero before bmerge with an explicit message."""
         cmd: str = _capture_merge_with_reference_panel_command()
         intersect_section = cmd.split('ComputeIntersect')[1].split('# ---- Merge')[0]
         assert '[ ! -s common.ids ]' in intersect_section
@@ -173,18 +158,10 @@ class TestRunMergeWithReferencePanelCommand:
         assert '--bmerge reference_intersect' in intersect_section
 
     def test_all_plink_19_steps_preserve_allele_order(self) -> None:
-        """Every PLINK 1.9 step (both extracts, single bmerge) keeps allele order.
+        """Every PLINK 1.9 step (both extracts, single bmerge) passes `--keep-allele-order`.
 
-        Three invocations expected in the queued bash:
-          1. cohort `--extract common.ids`
-          2. reference `--extract common.ids`
-          3. single `--bmerge` on the intersected filesets
-
-        The intersect eliminates allele-set conflicts, so no `.missnp` retry
-        path is queued.
-
-        plink2 calls (NormalizeCohort, ConvertToPlink2) do not need this flag
-        because plink2's `--make-bed` preserves REF/ALT orientation by default.
+        plink2 calls do not need this flag — `plink2 --make-bed` preserves
+        REF/ALT orientation by default.
         """
         cmd: str = _capture_merge_with_reference_panel_command()
         assert cmd.count('--bmerge') == 1
@@ -198,8 +175,6 @@ class TestRunMergeWithReferencePanelCommand:
         assert 'intersect_variants' in stats_section
         assert 'cohort_only_variants' in stats_section
         assert 'reference_only_variants' in stats_section
-        # The legacy missnp metric is gone (no retry path → nothing to report)
-        assert 'missnp_dropped' not in stats_section
 
     def test_converts_final_output_to_plink2(self) -> None:
         """Final output is PLINK2 PGEN, written by plink2 --make-pgen."""
