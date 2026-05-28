@@ -47,9 +47,13 @@ def run_plink_filter_for_king(
     ``.bed``/``.bim``/``.fam`` fileset that is consumed by the downstream KING
     job through Hail Batch in-memory wiring (no GCS round-trip).
 
-    The ``--make-bed`` re-pass has a useful side-effect on small synthetic
-    cohorts: it normalises the major-allele assignment, which suppresses KING's
-    "Too many first alleles as major" warning seen in the local Docker harness.
+    The ``--make-bed`` re-pass is deliberately run *without*
+    ``--keep-allele-order`` so that plink1.9 resets A1 to the minor allele.
+    KING ``--ibdseg`` expects minor-as-A1 (the "Too many first alleles as
+    major" warning fires otherwise), and this is the only stage that consumes
+    the resulting fileset — the upstream merged PLINK1.9 retains its
+    A1=ALT/A2=REF orientation for the reference-panel merge and ancestry
+    consumers that need REF/ALT semantics.
 
     Args:
         bed_path: Cloud path to the input PLINK 1.9 .bed file.
@@ -137,7 +141,6 @@ def run_plink_filter_for_king(
 
         plink --bfile {plink_input} --allow-extra-chr \\
             --remove remove_samples.tsv \\
-            --keep-allele-order \\
             --make-bed --out {j.filtered_plink}
         """,
     )
