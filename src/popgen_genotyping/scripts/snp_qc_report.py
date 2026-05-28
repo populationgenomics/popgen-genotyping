@@ -36,11 +36,11 @@ AUDIT_COLUMNS: list[str] = [
     'Cluster_Sep',
     'F_MISS',
     'strand_ambiguous',
-    'pass_gentrain',
-    'pass_cluster_sep',
-    'pass_fmiss',
-    'pass_strand',
-    'pass',
+    'fail_gentrain',
+    'fail_cluster_sep',
+    'fail_fmiss',
+    'fail_strand',
+    'fail',
 ]
 
 
@@ -112,7 +112,7 @@ def apply_filters(
     fmiss_max: float,
     exclude_strand_ambiguous: bool,
 ) -> pd.DataFrame:
-    """Append per-filter and aggregate pass columns to ``df``.
+    """Append per-filter and aggregate fail columns to ``df``.
 
     NaN inputs (missing EGT scores or missing F_MISS) are treated as failures
     so the variant lands on the exclusion list rather than silently passing.
@@ -122,19 +122,21 @@ def apply_filters(
         gentrain_min: Inclusive lower bound for ``GenTrain_Score``.
         cluster_sep_min: Inclusive lower bound for ``Cluster_Sep``.
         fmiss_max: Inclusive upper bound for merged-set ``F_MISS``.
-        exclude_strand_ambiguous: If True, ``strand_ambiguous`` SNPs fail
-            ``pass_strand``; otherwise the check is a no-op.
+        exclude_strand_ambiguous: If True, ``strand_ambiguous`` SNPs set
+            ``fail_strand``; otherwise the check is a no-op (always False).
 
     Returns:
-        Copy of ``df`` with five boolean columns: ``pass_gentrain``,
-        ``pass_cluster_sep``, ``pass_fmiss``, ``pass_strand``, ``pass``.
+        Copy of ``df`` with five boolean columns: ``fail_gentrain``,
+        ``fail_cluster_sep``, ``fail_fmiss``, ``fail_strand``, ``fail``.
+        ``True`` indicates the variant failed that filter (or any filter, for
+        the aggregate ``fail`` column).
     """
     out: pd.DataFrame = df.copy()
-    out['pass_gentrain'] = out['GenTrain_Score'].fillna(-1.0) >= gentrain_min
-    out['pass_cluster_sep'] = out['Cluster_Sep'].fillna(-1.0) >= cluster_sep_min
-    out['pass_fmiss'] = out['F_MISS'].fillna(1.0) <= fmiss_max
-    out['pass_strand'] = ~out['strand_ambiguous'] if exclude_strand_ambiguous else True
-    out['pass'] = out['pass_gentrain'] & out['pass_cluster_sep'] & out['pass_fmiss'] & out['pass_strand']
+    out['fail_gentrain'] = out['GenTrain_Score'].fillna(-1.0) < gentrain_min
+    out['fail_cluster_sep'] = out['Cluster_Sep'].fillna(-1.0) < cluster_sep_min
+    out['fail_fmiss'] = out['F_MISS'].fillna(1.0) > fmiss_max
+    out['fail_strand'] = out['strand_ambiguous'] if exclude_strand_ambiguous else False
+    out['fail'] = out['fail_gentrain'] | out['fail_cluster_sep'] | out['fail_fmiss'] | out['fail_strand']
     return out
 
 
@@ -158,23 +160,25 @@ def summarise(df: pd.DataFrame) -> pd.DataFrame:
     Returns:
         Two-column DataFrame (``metric``, ``value``) suitable for direct TSV write.
     """
-    first_fail_gentrain: pd.Series = ~df['pass_gentrain']
-    first_fail_cluster_sep: pd.Series = df['pass_gentrain'] & ~df['pass_cluster_sep']
-    first_fail_fmiss: pd.Series = df['pass_gentrain'] & df['pass_cluster_sep'] & ~df['pass_fmiss']
-    first_fail_strand: pd.Series = df['pass_gentrain'] & df['pass_cluster_sep'] & df['pass_fmiss'] & ~df['pass_strand']
+    first_fail_gentrain: pd.Series = df['fail_gentrain']
+    first_fail_cluster_sep: pd.Series = ~df['fail_gentrain'] & df['fail_cluster_sep']
+    first_fail_fmiss: pd.Series = ~df['fail_gentrain'] & ~df['fail_cluster_sep'] & df['fail_fmiss']
+    first_fail_strand: pd.Series = (
+        ~df['fail_gentrain'] & ~df['fail_cluster_sep'] & ~df['fail_fmiss'] & df['fail_strand']
+    )
     rows: list[tuple[str, int]] = [
         ('total_variants', len(df)),
         ('first_fail_gentrain', int(first_fail_gentrain.sum())),
         ('first_fail_cluster_sep', int(first_fail_cluster_sep.sum())),
         ('first_fail_fmiss', int(first_fail_fmiss.sum())),
         ('first_fail_strand', int(first_fail_strand.sum())),
-        ('fail_gentrain', int((~df['pass_gentrain']).sum())),
-        ('fail_cluster_sep', int((~df['pass_cluster_sep']).sum())),
-        ('fail_fmiss', int((~df['pass_fmiss']).sum())),
+        ('fail_gentrain', int(df['fail_gentrain'].sum())),
+        ('fail_cluster_sep', int(df['fail_cluster_sep'].sum())),
+        ('fail_fmiss', int(df['fail_fmiss'].sum())),
         ('strand_ambiguous', int(df['strand_ambiguous'].sum())),
-        ('fail_strand_filter', int((~df['pass_strand']).sum())),
-        ('total_excluded', int((~df['pass']).sum())),
-        ('total_retained', int(df['pass'].sum())),
+        ('fail_strand_filter', int(df['fail_strand'].sum())),
+        ('total_excluded', int(df['fail'].sum())),
+        ('total_retained', int((~df['fail']).sum())),
     ]
     return pd.DataFrame(rows, columns=['metric', 'value'])
 
@@ -197,7 +201,7 @@ def write_outputs(
     with gzip.open(audit_path, 'wt') as audit_handle:
         df[AUDIT_COLUMNS].to_csv(audit_handle, sep='\t', index=False)
 
-    excluded_ids: pd.Series = df.loc[~df['pass'], 'ID']
+    excluded_ids: pd.Series = df.loc[df['fail'], 'ID']
     exclusion_path.write_text('\n'.join(excluded_ids.astype(str)) + ('\n' if len(excluded_ids) else ''))
 
     summarise(df).to_csv(summary_path, sep='\t', index=False)

@@ -101,13 +101,13 @@ def test_apply_filters_marks_each_failure_class(egt_tsv: Path, vmiss_tsv: Path) 
     df = add_strand_ambiguous_flag(df_egt.merge(df_vmiss, on='ID', how='left'))
     out = apply_filters(df, **CONSERVATIVE_THRESHOLDS)  # type: ignore[arg-type]
     by_id: dict[str, dict[str, bool]] = out.set_index('ID').to_dict(orient='index')  # type: ignore[assignment]
-    assert by_id['rs1']['pass'] is True
-    assert by_id['rs2']['pass'] is False  # A/T
-    assert by_id['rs3']['pass'] is False  # C/G
-    assert by_id['rs4']['pass'] is False  # gentrain
-    assert by_id['rs5']['pass'] is False  # cluster_sep
-    assert by_id['rs6']['pass'] is False  # NaN scores
-    assert by_id['rs7']['pass'] is False  # fmiss
+    assert by_id['rs1']['fail'] is False
+    assert by_id['rs2']['fail'] is True  # A/T
+    assert by_id['rs3']['fail'] is True  # C/G
+    assert by_id['rs4']['fail'] is True  # gentrain
+    assert by_id['rs5']['fail'] is True  # cluster_sep
+    assert by_id['rs6']['fail'] is True  # NaN scores
+    assert by_id['rs7']['fail'] is True  # fmiss
 
 
 def test_apply_filters_strand_flag_off_keeps_ambiguous(egt_tsv: Path, vmiss_tsv: Path) -> None:
@@ -122,8 +122,8 @@ def test_apply_filters_strand_flag_off_keeps_ambiguous(egt_tsv: Path, vmiss_tsv:
         exclude_strand_ambiguous=False,
     )
     by_id: dict[str, dict[str, bool]] = out.set_index('ID').to_dict(orient='index')  # type: ignore[assignment]
-    assert by_id['rs2']['pass'] is True
-    assert by_id['rs3']['pass'] is True
+    assert by_id['rs2']['fail'] is False
+    assert by_id['rs3']['fail'] is False
     # The bookkeeping column still tracks ambiguity even when not enforced.
     assert by_id['rs2']['strand_ambiguous'] is True
 
@@ -141,8 +141,8 @@ def test_apply_filters_nan_fmiss_fails() -> None:
     )
     df = add_strand_ambiguous_flag(df)
     out = apply_filters(df, **CONSERVATIVE_THRESHOLDS)  # type: ignore[arg-type]
-    assert out['pass_fmiss'].iloc[0] is False or not out['pass_fmiss'].iloc[0]
-    assert not out['pass'].iloc[0]
+    assert bool(out['fail_fmiss'].iloc[0])
+    assert bool(out['fail'].iloc[0])
 
 
 def test_summarise_counts_match_filter_columns(egt_tsv: Path, vmiss_tsv: Path) -> None:
@@ -199,7 +199,7 @@ def test_main_end_to_end(tmp_path: Path, egt_tsv: Path, vmiss_tsv: Path) -> None
     assert set(audit_df['ID']) == {'rs1', 'rs2', 'rs3', 'rs4', 'rs5', 'rs6', 'rs7'}
     excluded: list[str] = excl.read_text().strip().splitlines()
     assert set(excluded) == {'rs2', 'rs3', 'rs4', 'rs5', 'rs6', 'rs7'}
-    assert audit_df.loc[audit_df['ID'] == 'rs1', 'pass'].iloc[0]
+    assert not audit_df.loc[audit_df['ID'] == 'rs1', 'fail'].iloc[0]
 
 
 def test_write_outputs_empty_exclusion(tmp_path: Path) -> None:
@@ -214,11 +214,11 @@ def test_write_outputs_empty_exclusion(tmp_path: Path) -> None:
             'Cluster_Sep': [0.9],
             'F_MISS': [0.0],
             'strand_ambiguous': [False],
-            'pass_gentrain': [True],
-            'pass_cluster_sep': [True],
-            'pass_fmiss': [True],
-            'pass_strand': [True],
-            'pass': [True],
+            'fail_gentrain': [False],
+            'fail_cluster_sep': [False],
+            'fail_fmiss': [False],
+            'fail_strand': [False],
+            'fail': [False],
         },
     )
     audit = tmp_path / 'a.tsv.gz'
