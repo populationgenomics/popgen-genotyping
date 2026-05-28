@@ -63,6 +63,11 @@ storage = '50G'
 cpu = 2
 memory = 'standard'
 storage = '20G'
+# References-repo keys for the EGT INFO BCF + its index. Defaults match the
+# GDA-8v1-0_D1 ClusterFile shipped under gs://cpg-common-main/references/illumina_microarray/.
+# Override when running against a different Illumina chip / cluster-file revision.
+egt_info_bcf_reference_key = 'illumina_microarray/GDA_8v1_0_D1_ClusterFile_egt_info_bcf'
+egt_info_bcf_index_reference_key = 'illumina_microarray/GDA_8v1_0_D1_ClusterFile_egt_info_bcf_index'
 
 [popgen_genotyping.snp_qc_report.extract]
 cpu = 1

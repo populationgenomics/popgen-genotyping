@@ -432,7 +432,8 @@ class SnpQcReport(MultiCohortStage):
         outputs: dict[str, Path] = self.expected_outputs(multicohort=multicohort)
         merged_vmiss_path: Path = inputs.as_path(target=multicohort, stage=Plink2Qc, key='vmiss')
 
-        thresholds_path: list[str] = ['popgen_genotyping', 'snp_qc_report', 'thresholds']
+        stage_path: list[str] = ['popgen_genotyping', 'snp_qc_report']
+        thresholds_path: list[str] = [*stage_path, 'thresholds']
         gentrain_min: float = config_retrieve([*thresholds_path, 'gentrain_min'], 0.7)
         cluster_sep_min: float = config_retrieve([*thresholds_path, 'cluster_sep_min'], 0.4)
         fmiss_max: float = config_retrieve([*thresholds_path, 'fmiss_max'], 0.02)
@@ -441,11 +442,18 @@ class SnpQcReport(MultiCohortStage):
             True,
         )
 
+        egt_info_bcf_key: str = config_retrieve(
+            [*stage_path, 'egt_info_bcf_reference_key'],
+            'illumina_microarray/GDA_8v1_0_D1_ClusterFile_egt_info_bcf',
+        )
+        egt_info_bcf_index_key: str = config_retrieve(
+            [*stage_path, 'egt_info_bcf_index_reference_key'],
+            'illumina_microarray/GDA_8v1_0_D1_ClusterFile_egt_info_bcf_index',
+        )
+
         jobs: list[BashJob] = run_snp_qc_report(
-            egt_info_bcf_path=reference_path('illumina_microarray/GDA_8v1_0_D1_ClusterFile_egt_info_bcf'),
-            egt_info_bcf_index_path=reference_path(
-                'illumina_microarray/GDA_8v1_0_D1_ClusterFile_egt_info_bcf_index',
-            ),
+            egt_info_bcf_path=reference_path(egt_info_bcf_key),
+            egt_info_bcf_index_path=reference_path(egt_info_bcf_index_key),
             merged_vmiss_path=str(merged_vmiss_path),
             gentrain_min=gentrain_min,
             cluster_sep_min=cluster_sep_min,
