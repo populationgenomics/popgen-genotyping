@@ -16,6 +16,7 @@ from popgen_genotyping.stages import (
     MergeCohortPlink,
     Plink2Qc,
     QcReport,
+    SnpQcReport,
 )
 
 
@@ -37,6 +38,7 @@ def cli_main() -> None:
         ExportCohortDatasets,
         Plink2Qc,
         KingIbdseg,
+        SnpQcReport,
         QcReport,
     ]
 
