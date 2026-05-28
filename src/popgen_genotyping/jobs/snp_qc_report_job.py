@@ -1,13 +1,18 @@
 """Hail Batch jobs to produces the per-SNP QC exclusion list.
 
-Two jobs:
+Three jobs:
 
 1. ``bcftools_image`` extract — pulls ``GenTrain_Score`` and ``Cluster_Sep`` (plus
    CHROM/POS/REF/ALT/ID) out of the references-repo EGT info BCF as a
    header-less TSV.
-2. ``driver_image`` runs ``scripts/snp_qc_report.py``, joining the
-   EGT TSV with the merged-set ``plink2 --missing`` output and applying the
-   threshold filters declared under
+2. ``plink_image`` merged-set variant metrics — runs ``plink2 --missing`` and
+   ``plink2 --hwe ... --write-snplist`` against the merged PGEN to write the
+   per-variant F_MISS table and the Hardy-Weinberg pass snplist. Two plink2
+   invocations are required because ``--hwe`` is a variant filter and would
+   otherwise restrict ``--missing`` to the post-filter variant set.
+3. ``driver_image`` runs ``scripts/snp_qc_report.py``, joining the EGT TSV,
+   the merged-set ``.vmiss``, and the HWE pass snplist, and applying the
+   thresholds declared under
    ``[popgen_genotyping.snp_qc_report.thresholds]``.
 """
 
@@ -30,10 +35,16 @@ def run_snp_qc_report(
     *,
     egt_info_bcf_path: str,
     egt_info_bcf_index_path: str,
-    merged_vmiss_path: str,
+    merged_pgen_path: str,
+    merged_pvar_path: str,
+    merged_psam_path: str,
     gentrain_min: float,
     cluster_sep_min: float,
     fmiss_max: float,
+    hwe_p: float,
+    hwe_k: float,
+    hwe_midp: bool,
+    hwe_keep_fewhet: bool,
     output_audit_tsv_path: str,
     output_exclusion_list_path: str,
     output_summary_tsv_path: str,
@@ -44,18 +55,26 @@ def run_snp_qc_report(
     Args:
         egt_info_bcf_path: Path to the references-repo EGT info BCF.
         egt_info_bcf_index_path: Path to its ``.csi`` index.
-        merged_vmiss_path: Path to the merged-set ``.vmiss`` from ``Plink2Qc``.
+        merged_pgen_path: Path to the merged PLINK2 ``.pgen``.
+        merged_pvar_path: Path to the merged PLINK2 ``.pvar``.
+        merged_psam_path: Path to the merged PLINK2 ``.psam``.
         gentrain_min: Inclusive lower bound for ``GenTrain_Score``.
         cluster_sep_min: Inclusive lower bound for ``Cluster_Sep``.
         fmiss_max: Inclusive upper bound for the merged-set ``F_MISS``.
+        hwe_p: ``p`` argument to ``plink2 --hwe`` (per-variant p-value floor;
+            effective threshold is ``p · 10^(-n·k)``).
+        hwe_k: ``k`` argument to ``plink2 --hwe`` (sample-size scaling exponent).
+        hwe_midp: If True, pass the ``midp`` modifier to ``plink2 --hwe``.
+        hwe_keep_fewhet: If True, pass the ``keep-fewhet`` modifier so only
+            excess-heterozygosity variants are filtered.
         output_audit_tsv_path: Output path for the bgzipped audit TSV.
         output_exclusion_list_path: Output path for the exclusion ``.snplist``.
         output_summary_tsv_path: Output path for the summary TSV.
-        job_name: Display name for the filter job (the extract job appends
-            an ``_extract_egt_info`` suffix).
+        job_name: Display name for the filter job (the extract jobs append
+            ``_extract_egt_info`` / ``_hwe`` suffixes).
 
     Returns:
-        Both queued jobs in dependency order: ``[extract_cluster_file_info, generate_snp_exclusion_list]``.
+        Queued jobs in dependency order: ``[extract_cluster_file_info, hwe_snplist, generate_snp_exclusion_list]``.
     """
     b: Batch = get_batch()
 
@@ -84,6 +103,48 @@ def run_snp_qc_report(
         """,
     )
 
+    hwe_snplist: BashJob = register_job(
+        batch=b,
+        job_name=f'{job_name}_hwe',
+        config_path=['popgen_genotyping', 'snp_qc_report', 'hwe'],
+        image=config_retrieve(['workflow', 'plink_image']),
+        default_cpu=2,
+        default_storage='50G',
+    )
+
+    merged_pgen = b.read_input_group(
+        pgen=merged_pgen_path,
+        pvar=merged_pvar_path,
+        psam=merged_psam_path,
+    )
+    hwe_snplist.declare_resource_group(
+        hwe_pass={
+            'snplist': '{root}.snplist',
+            'vmiss': '{root}.vmiss',
+        },
+    )
+
+    hwe_modifiers: str = ' '.join(m for m, on in (('midp', hwe_midp), ('keep-fewhet', hwe_keep_fewhet)) if on)
+    hwe_args: str = f'{hwe_p} {hwe_k}' + (f' {hwe_modifiers}' if hwe_modifiers else '')
+
+    # Two plink2 invocations writing to the same prefix: --missing first so its
+    # .vmiss reflects the full merged variant set, then --hwe --write-snplist
+    # which restricts the post-filter snplist (but does not overwrite .vmiss).
+    hwe_snplist.command(
+        f"""
+        set -euxo pipefail
+        plink2 --pfile {merged_pgen} \\
+            --output-chr chrM \\
+            --missing \\
+            --out {hwe_snplist.hwe_pass}
+        plink2 --pfile {merged_pgen} \\
+            --output-chr chrM \\
+            --hwe {hwe_args} \\
+            --write-snplist \\
+            --out {hwe_snplist.hwe_pass}
+        """,
+    )
+
     generate_snp_exclusion_list: BashJob = register_job(
         batch=b,
         job_name=job_name,
@@ -93,11 +154,10 @@ def run_snp_qc_report(
         default_memory='standard',
         default_storage='20G',
     )
-    generate_snp_exclusion_list.depends_on(extract_cluster_file_info)
+    generate_snp_exclusion_list.depends_on(extract_cluster_file_info, hwe_snplist)
 
     script_path: str = str(files('popgen_genotyping.scripts').joinpath('snp_qc_report.py'))
     script_resource = b.read_input(script_path)
-    merged_vmiss = b.read_input(merged_vmiss_path)
 
     generate_snp_exclusion_list.declare_resource_group(
         outputs={
@@ -112,7 +172,8 @@ def run_snp_qc_report(
         set -euxo pipefail
         python3 {script_resource} \\
             --egt-info-tsv {extract_cluster_file_info.egt_info.tsv} \\
-            --merged-vmiss {merged_vmiss} \\
+            --merged-vmiss {hwe_snplist.hwe_pass.vmiss} \\
+            --hwe-pass-snplist {hwe_snplist.hwe_pass.snplist} \\
             --gentrain-min {gentrain_min} \\
             --cluster-sep-min {cluster_sep_min} \\
             --fmiss-max {fmiss_max} \\
@@ -126,4 +187,4 @@ def run_snp_qc_report(
     b.write_output(generate_snp_exclusion_list.outputs.exclusion_list, output_exclusion_list_path)
     b.write_output(generate_snp_exclusion_list.outputs.summary_tsv, output_summary_tsv_path)
 
-    return [extract_cluster_file_info, generate_snp_exclusion_list]
+    return [extract_cluster_file_info, hwe_snplist, generate_snp_exclusion_list]

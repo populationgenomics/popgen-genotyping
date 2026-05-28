@@ -56,9 +56,7 @@ def run_plink2_qc(
     j.declare_resource_group(
         plink_qc_outputs={
             'smiss': '{root}.smiss',
-            'vmiss': '{root}.vmiss',
             'afreq': '{root}.afreq',
-            'hardy': '{root}.hardy',
             'het': '{root}.het',
             'sexcheck': '{root}.sexcheck',
             'log': '{root}.log',
@@ -77,7 +75,6 @@ def run_plink2_qc(
             --output-chr chrM \\
             --missing \\
             --freq \\
-            --hardy \\
             --het \\
             --check-sex {check_sex_args} \\
             --out {j.plink_qc_outputs}

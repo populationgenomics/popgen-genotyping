@@ -14,8 +14,8 @@ graph TD
     P2P1[Plink2ToPlink1<br/><i>PLINK2 to PLINK1.9 if needed</i>]:::conditional --> MCP
     MCP --> ECD[ExportCohortDatasets<br/><i>Export to PLINK2/BCF</i>]:::multicohort
     MCP --> KING[KingIbdseg<br/><i>KING --ibdseg Relatedness</i>]:::multicohort
-    ECD --> QC[Plink2Qc<br/><i>PLINK2 QC Suite</i>]:::multicohort
-    QC --> SNP[SnpQcReport<br/><i>EGT + Call-Rate + Strand Filter</i>]:::multicohort
+    ECD --> QC[Plink2Qc<br/><i>Per-sample QC</i>]:::multicohort
+    ECD --> SNP[SnpQcReport<br/><i>EGT + Call-Rate + HWE Filter</i>]:::multicohort
     QC --> QR[QcReport<br/><i>Combined QC CSV</i>]:::multicohort
     BAF --> QR
 

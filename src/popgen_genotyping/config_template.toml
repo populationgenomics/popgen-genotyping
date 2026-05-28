@@ -74,11 +74,23 @@ cpu = 1
 memory = 'standard'
 storage = '10G'
 
+[popgen_genotyping.snp_qc_report.hwe]
+cpu = 2
+memory = 'standard'
+storage = '50G'
+
 [popgen_genotyping.snp_qc_report.thresholds]
 gentrain_min = 0.7
 cluster_sep_min = 0.4
 # F_MISS = 1 - call rate.
 fmiss_max = 0.02
+# plink2 --hwe p k [midp] [keep-fewhet]: drop variants with HWE exact p-value
+# below p * 10^(-n*k), where n is the sample size. See
+# https://www.cog-genomics.org/plink/2.0/filter#hwe.
+hwe_p = 1e-5
+hwe_k = 0.001
+hwe_midp = true
+hwe_keep_fewhet = true
 
 [popgen_genotyping.qc_report]
 cpu = 2

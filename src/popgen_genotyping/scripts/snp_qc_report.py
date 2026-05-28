@@ -1,10 +1,10 @@
 """Per-SNP QC filter for the genotyping pipeline.
 
 Joins the Illumina EGT INFO TSV (extracted from the references-repo
-sample-less BCF) with the merged-set ``plink2 --missing`` per-variant output,
-applies three threshold filters (``GenTrain_Score``, ``Cluster_Sep``,
-``F_MISS``), and emits an exclusion ``.snplist`` plus an audit TSV and
-per-filter summary.
+sample-less BCF) with the merged-set ``plink2 --missing`` per-variant output
+and a ``plink2 --hwe`` pass snplist, applies the per-filter thresholds
+(``GenTrain_Score``, ``Cluster_Sep``, ``F_MISS``, Hardy-Weinberg), and emits
+an exclusion ``.snplist`` plus an audit TSV and per-filter summary.
 """
 
 from __future__ import annotations
@@ -38,6 +38,7 @@ AUDIT_COLUMNS: list[str] = [
     'fail_gentrain',
     'fail_cluster_sep',
     'fail_fmiss',
+    'fail_hwe',
     'fail',
 ]
 
@@ -80,35 +81,53 @@ def load_vmiss(path: Path) -> pd.DataFrame:
     return df[['ID', 'F_MISS']].copy()
 
 
+def load_hwe_pass_ids(path: Path) -> set[str]:
+    """Read a ``plink2 --write-snplist`` output as a set of passing variant IDs.
+
+    Args:
+        path: Newline-delimited ``.snplist`` (the post-filter variant set after
+            ``plink2 --hwe``).
+
+    Returns:
+        Set of variant IDs that passed the HWE filter. Blank lines are skipped.
+    """
+    text: str = path.read_text()
+    return {line.strip() for line in text.splitlines() if line.strip()}
+
+
 def apply_filters(
     df: pd.DataFrame,
     *,
     gentrain_min: float,
     cluster_sep_min: float,
     fmiss_max: float,
+    hwe_pass_ids: set[str],
 ) -> pd.DataFrame:
     """Append per-filter and aggregate fail columns to ``df``.
 
     NaN inputs (missing EGT scores or missing F_MISS) are treated as failures
     so the variant lands on the exclusion list rather than silently passing.
+    HWE failure is determined by absence from the ``plink2 --hwe`` pass list.
 
     Args:
         df: Joined EGT + vmiss frame.
         gentrain_min: Inclusive lower bound for ``GenTrain_Score``.
         cluster_sep_min: Inclusive lower bound for ``Cluster_Sep``.
         fmiss_max: Inclusive upper bound for merged-set ``F_MISS``.
+        hwe_pass_ids: Variant IDs that passed ``plink2 --hwe``.
 
     Returns:
-        Copy of ``df`` with four boolean columns: ``fail_gentrain``,
-        ``fail_cluster_sep``, ``fail_fmiss``, ``fail``. ``True`` indicates
-        the variant failed that filter (or any filter, for the aggregate
-        ``fail`` column).
+        Copy of ``df`` with five boolean columns: ``fail_gentrain``,
+        ``fail_cluster_sep``, ``fail_fmiss``, ``fail_hwe``, ``fail``.
+        ``True`` indicates the variant failed that filter (or any filter, for
+        the aggregate ``fail`` column).
     """
     out: pd.DataFrame = df.copy()
     out['fail_gentrain'] = out['GenTrain_Score'].fillna(-1.0) < gentrain_min
     out['fail_cluster_sep'] = out['Cluster_Sep'].fillna(-1.0) < cluster_sep_min
     out['fail_fmiss'] = out['F_MISS'].fillna(1.0) > fmiss_max
-    out['fail'] = out['fail_gentrain'] | out['fail_cluster_sep'] | out['fail_fmiss']
+    out['fail_hwe'] = ~out['ID'].astype(str).isin(hwe_pass_ids)
+    out['fail'] = out['fail_gentrain'] | out['fail_cluster_sep'] | out['fail_fmiss'] | out['fail_hwe']
     return out
 
 
@@ -119,8 +138,8 @@ def summarise(df: pd.DataFrame) -> pd.DataFrame:
 
     * ``first_fail_<filter>`` — count of variants for which ``<filter>`` was
       the first failing check in the priority cascade
-      ``gentrain → cluster_sep → fmiss``. Disjoint across filters: each
-      excluded variant contributes to exactly one row, so the three
+      ``gentrain → cluster_sep → fmiss → hwe``. Disjoint across filters: each
+      excluded variant contributes to exactly one row, so the four
       ``first_fail_*`` rows sum to ``total_excluded``.
     * ``fail_<filter>`` — count of variants that fail ``<filter>`` regardless
       of any other filter. Overlapping across filters; useful when tuning a
@@ -135,14 +154,17 @@ def summarise(df: pd.DataFrame) -> pd.DataFrame:
     first_fail_gentrain: pd.Series = df['fail_gentrain']
     first_fail_cluster_sep: pd.Series = ~df['fail_gentrain'] & df['fail_cluster_sep']
     first_fail_fmiss: pd.Series = ~df['fail_gentrain'] & ~df['fail_cluster_sep'] & df['fail_fmiss']
+    first_fail_hwe: pd.Series = ~df['fail_gentrain'] & ~df['fail_cluster_sep'] & ~df['fail_fmiss'] & df['fail_hwe']
     rows: list[tuple[str, int]] = [
         ('total_variants', len(df)),
         ('first_fail_gentrain', int(first_fail_gentrain.sum())),
         ('first_fail_cluster_sep', int(first_fail_cluster_sep.sum())),
         ('first_fail_fmiss', int(first_fail_fmiss.sum())),
+        ('first_fail_hwe', int(first_fail_hwe.sum())),
         ('fail_gentrain', int(df['fail_gentrain'].sum())),
         ('fail_cluster_sep', int(df['fail_cluster_sep'].sum())),
         ('fail_fmiss', int(df['fail_fmiss'].sum())),
+        ('fail_hwe', int(df['fail_hwe'].sum())),
         ('total_excluded', int(df['fail'].sum())),
         ('total_retained', int((~df['fail']).sum())),
     ]
@@ -185,6 +207,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--egt-info-tsv', type=Path, required=True)
     p.add_argument('--merged-vmiss', type=Path, required=True)
+    p.add_argument('--hwe-pass-snplist', type=Path, required=True)
     p.add_argument('--gentrain-min', type=float, required=True)
     p.add_argument('--cluster-sep-min', type=float, required=True)
     p.add_argument('--fmiss-max', type=float, required=True)
@@ -206,12 +229,14 @@ def main(argv: list[str] | None = None) -> int:
     args: argparse.Namespace = parse_args(argv)
     df_egt: pd.DataFrame = load_egt_info(args.egt_info_tsv)
     df_vmiss: pd.DataFrame = load_vmiss(args.merged_vmiss)
+    hwe_pass_ids: set[str] = load_hwe_pass_ids(args.hwe_pass_snplist)
     df: pd.DataFrame = df_egt.merge(df_vmiss, on='ID', how='left')
     df = apply_filters(
         df,
         gentrain_min=args.gentrain_min,
         cluster_sep_min=args.cluster_sep_min,
         fmiss_max=args.fmiss_max,
+        hwe_pass_ids=hwe_pass_ids,
     )
     write_outputs(
         df,
