@@ -14,6 +14,7 @@ from popgen_genotyping.stages import (
     GtcToBcfs,
     KingIbdseg,
     MergeCohortPlink,
+    MergeWithReferencePanel,
     Plink2Qc,
     QcReport,
 )
@@ -37,6 +38,7 @@ def cli_main() -> None:
         ExportCohortDatasets,
         Plink2Qc,
         KingIbdseg,
+        MergeWithReferencePanel,
         QcReport,
     ]
 

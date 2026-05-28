@@ -16,6 +16,7 @@ from popgen_genotyping.jobs.export_cohort_datasets_job import run_export_cohort_
 from popgen_genotyping.jobs.gtc_to_bcfs_job import run_gtc_to_bcfs
 from popgen_genotyping.jobs.king_ibdseg_job import run_king_ibdseg
 from popgen_genotyping.jobs.merge_cohort_plink_job import run_merge_plink
+from popgen_genotyping.jobs.merge_with_reference_panel_job import run_merge_with_reference_panel
 from popgen_genotyping.jobs.plink2_qc_job import run_plink2_qc
 from popgen_genotyping.jobs.plink2_to_plink1_job import run_plink2_to_plink1
 from popgen_genotyping.jobs.qc_report_job import run_qc_report
@@ -390,6 +391,74 @@ class KingIbdseg(MultiCohortStage):
             output_segments_x_path=str(outputs['segments_x']),
             output_log_path=str(outputs['log']),
             job_name=f'KingIbdseg_{multicohort.name}',
+        )
+
+        return self.make_outputs(multicohort, data=outputs, jobs=[j])
+
+
+@stage(
+    analysis_type='array_reference_panel_merged',
+    analysis_keys=['pgen'],
+)
+class MergeWithReferencePanel(MultiCohortStage):
+    """
+    Merge a cohort PLINK2 aggregate with an external reference panel.
+
+    No `required_stages`: cohort PGEN/PVAR/PSAM and reference BED/BIM/FAM
+    paths are read from `[popgen_genotyping.references.*]`, so
+    `only_stages=['MergeWithReferencePanel']` can target any existing
+    `ExportCohortDatasets` output.
+    """
+
+    def expected_outputs(self, multicohort: MultiCohort) -> dict[str, Path]:
+        """
+        Define the merged-with-reference PLINK2 fileset and associated artifacts.
+        """
+        prefix: Path = get_output_prefix(dataset=multicohort.analysis_dataset, stage_name=self.name)
+        datestamp: str = datetime.now(tz=timezone.utc).strftime('%Y%m%d')
+        panel_id: str = config_retrieve(['popgen_genotyping', 'references', 'reference_panel', 'panel_id'])
+        base_name = f'{datestamp}_cohort_plus_{panel_id}'
+        return {
+            'pgen': prefix / f'{base_name}.pgen',
+            'pvar': prefix / f'{base_name}.pvar',
+            'psam': prefix / f'{base_name}.psam',
+            'log': prefix / f'{base_name}.log',
+            'stats': prefix / f'{base_name}_variant_intersection_stats.tsv',
+        }
+
+    def queue_jobs(self, multicohort: MultiCohort, _inputs: StageInput) -> StageOutput:
+        """
+        Queue the reference-panel merge job for the multi-cohort.
+        """
+        outputs: dict[str, Path] = self.expected_outputs(multicohort=multicohort)
+
+        cohort_cfg: dict[str, str] = config_retrieve(['popgen_genotyping', 'references', 'cohort_aggregate'])
+        ref_cfg: dict[str, str] = config_retrieve(['popgen_genotyping', 'references', 'reference_panel'])
+        fasta_ref: str = config_retrieve(['popgen_genotyping', 'references', 'fasta_ref_path'])
+        drop_strand_ambiguous: bool = config_retrieve(
+            ['popgen_genotyping', 'merge_with_reference_panel', 'drop_strand_ambiguous'],
+            True,
+        )
+
+        j: BashJob = run_merge_with_reference_panel(
+            cohort_pgen_paths={
+                'pgen': cohort_cfg['pgen_path'],
+                'pvar': cohort_cfg['pvar_path'],
+                'psam': cohort_cfg['psam_path'],
+            },
+            reference_panel_paths={
+                'bed': ref_cfg['bed_path'],
+                'bim': ref_cfg['bim_path'],
+                'fam': ref_cfg['fam_path'],
+            },
+            fasta_ref_path=fasta_ref,
+            expected_contig_style=ref_cfg['expected_contig_style'],
+            expected_variant_id_pattern=ref_cfg['expected_variant_id_pattern'],
+            output_pgen_prefix=str(outputs['pgen']).removesuffix('.pgen'),
+            output_log_path=str(outputs['log']),
+            output_stats_path=str(outputs['stats']),
+            drop_strand_ambiguous=drop_strand_ambiguous,
+            job_name=f'MergeWithReferencePanel_{multicohort.name}',
         )
 
         return self.make_outputs(multicohort, data=outputs, jobs=[j])
