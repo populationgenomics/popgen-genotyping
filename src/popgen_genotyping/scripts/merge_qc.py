@@ -5,14 +5,19 @@ import sys
 
 import pandas as pd
 
-# KING kinship coefficient thresholds for relatedness degree classification.
-# Ref: Manichaikul et al. (2010), doi:10.1093/bioinformatics/btq559
-KINSHIP_MZ: float = 0.354
-KINSHIP_1ST: float = 0.177
-KINSHIP_2ND: float = 0.0884
-KINSHIP_3RD: float = 0.0442
-
 DEGREE_COLS: list[str] = ['RELATED_MZ', 'RELATED_1ST', 'RELATED_2ND', 'RELATED_3RD']
+
+# Map KING --ibdseg InfType values to RELATED_* degree columns.
+# Ref: Manichaikul et al. (2010), doi:10.1093/bioinformatics/btq559;
+# Chen et al. (2024) KING --ibdseg. KING emits InfType in {Dup/MZ, PO, FS, 2nd, 3rd}
+# under --degree 3; PO and FS both fall in the 1st-degree bin.
+INFTYPE_TO_DEGREE: dict[str, str] = {
+    'Dup/MZ': 'RELATED_MZ',
+    'PO': 'RELATED_1ST',
+    'FS': 'RELATED_1ST',
+    '2nd': 'RELATED_2ND',
+    '3rd': 'RELATED_3RD',
+}
 
 
 def read_qc_file(filepath: str) -> pd.DataFrame:
@@ -31,92 +36,84 @@ def read_qc_file(filepath: str) -> pd.DataFrame:
     return df
 
 
-def get_degree(kinship: float) -> str | None:
-    """Categorise a kinship coefficient into a relatedness degree.
+def process_seg(seg_path: str) -> pd.DataFrame:
+    """Process a KING ``--ibdseg`` ``.seg`` file into per-sample relatedness columns.
+
+    Each degree column contains semicolon-separated ``REL_ID:KINSHIP:INFTYPE``
+    strings. Kinship is the IBD-based KING kinship coefficient
+    ``IBD1Seg/4 + IBD2Seg/2`` (equivalent to ``PropIBD/2``). InfType is KING's
+    relationship inference (``PO``, ``FS``, ``2nd``, ``3rd``, ``Dup/MZ``); any
+    InfType not in that set raises ``ValueError``.
 
     Args:
-        kinship: KING kinship coefficient.
-
-    Returns:
-        Degree string or None if below 3rd degree threshold.
-    """
-    if kinship >= KINSHIP_MZ:
-        return 'RELATED_MZ'
-    if kinship >= KINSHIP_1ST:
-        return 'RELATED_1ST'
-    if kinship >= KINSHIP_2ND:
-        return 'RELATED_2ND'
-    if kinship >= KINSHIP_3RD:
-        return 'RELATED_3RD'
-    return None
-
-
-def process_kinship(kin0_path: str) -> pd.DataFrame:
-    """Process a PLINK2 .kin0 file into per-sample relatedness columns.
-
-    Each degree column contains semicolon-separated ``REL_ID:KINSHIP:IBS0`` strings.
-
-    Args:
-        kin0_path: Path to the .kin0 file.
+        seg_path: Path to the autosomal ``.seg`` file emitted by KING
+            ``--ibdseg``.
 
     Returns:
         DataFrame with IID and RELATED_MZ/1ST/2ND/3RD columns, or an empty
         DataFrame with those columns if no relationships are found.
+
+    Raises:
+        ValueError: If the ``.seg`` file is missing any of the required
+            columns or contains an unrecognised ``InfType``.
     """
     empty = pd.DataFrame(columns=['IID', *DEGREE_COLS])
 
-    kin_df = read_qc_file(kin0_path)
-    if kin_df.empty:
+    seg_df = read_qc_file(seg_path)
+    if seg_df.empty:
         return empty
 
-    required = {'IID1', 'IID2', 'KINSHIP', 'IBS0'}
-    if not required.issubset(kin_df.columns):
-        print(
-            'Warning: Expected IID1, IID2, KINSHIP, and IBS0 columns in .kin0 file but column(s) not found.',
+    required = {'ID1', 'ID2', 'IBD1Seg', 'IBD2Seg', 'InfType'}
+    missing = required - set(seg_df.columns)
+    if missing:
+        raise ValueError(
+            f'.seg file {seg_path} is missing required column(s): {sorted(missing)}',
         )
+
+    unknown = set(seg_df['InfType']) - set(INFTYPE_TO_DEGREE)
+    if unknown:
+        raise ValueError(
+            f'.seg file {seg_path} contains unrecognised InfType value(s): {sorted(unknown)}. '
+            f'Expected one of {sorted(INFTYPE_TO_DEGREE)}.',
+        )
+
+    seg_df = seg_df.assign(
+        KINSHIP=(seg_df['IBD1Seg'].astype(float) / 4.0 + seg_df['IBD2Seg'].astype(float) / 2.0).round(4),
+        DEGREE=seg_df['InfType'].map(INFTYPE_TO_DEGREE),
+    )
+    if seg_df.empty:
         return empty
 
-    # Filter to >= 3rd degree
-    kin_df = kin_df[kin_df['KINSHIP'] >= KINSHIP_3RD]
-    if kin_df.empty:
-        return empty
+    rel_1 = seg_df[['ID1', 'ID2', 'KINSHIP', 'InfType', 'DEGREE']].copy()
+    rel_1.columns = pd.Index(['IID', 'REL_ID', 'KINSHIP', 'INFTYPE', 'DEGREE'])
 
-    # Create two-way mapping
-    kin_1 = kin_df[['IID1', 'IID2', 'KINSHIP', 'IBS0']].copy()
-    kin_1.columns = pd.Index(['IID', 'REL_ID', 'KINSHIP', 'IBS0'])
+    rel_2 = seg_df[['ID2', 'ID1', 'KINSHIP', 'InfType', 'DEGREE']].copy()
+    rel_2.columns = pd.Index(['IID', 'REL_ID', 'KINSHIP', 'INFTYPE', 'DEGREE'])
 
-    kin_2 = kin_df[['IID2', 'IID1', 'KINSHIP', 'IBS0']].copy()
-    kin_2.columns = pd.Index(['IID', 'REL_ID', 'KINSHIP', 'IBS0'])
+    rel_stacked = pd.concat([rel_1, rel_2], ignore_index=True)
 
-    kin_stacked = pd.concat([kin_1, kin_2], ignore_index=True)
-
-    # Format the string payload: REL_ID:KINSHIP:IBS0
-    kin_stacked['REL_STR'] = (
-        kin_stacked['REL_ID'].astype(str)
+    # Format the string payload: REL_ID:KINSHIP:INFTYPE
+    rel_stacked['REL_STR'] = (
+        rel_stacked['REL_ID'].astype(str)
         + ':'
-        + kin_stacked['KINSHIP'].round(4).astype(str)
+        + rel_stacked['KINSHIP'].astype(str)
         + ':'
-        + kin_stacked['IBS0'].round(4).astype(str)
+        + rel_stacked['INFTYPE'].astype(str)
     )
 
-    # Categorise degrees
-    kin_stacked['DEGREE'] = kin_stacked['KINSHIP'].apply(get_degree)
-
-    # Group and pivot
-    kin_grouped = kin_stacked.groupby(['IID', 'DEGREE'])['REL_STR'].apply(';'.join).reset_index()
-    kin_pivoted = kin_grouped.pivot_table(
+    rel_grouped = rel_stacked.groupby(['IID', 'DEGREE'])['REL_STR'].apply(';'.join).reset_index()
+    rel_pivoted = rel_grouped.pivot_table(
         index='IID',
         columns='DEGREE',
         values='REL_STR',
         aggfunc='first',
     ).reset_index()
 
-    # Guarantee all degree columns exist
     for col in DEGREE_COLS:
-        if col not in kin_pivoted.columns:
-            kin_pivoted[col] = pd.NA
+        if col not in rel_pivoted.columns:
+            rel_pivoted[col] = pd.NA
 
-    return kin_pivoted[['IID', *DEGREE_COLS]]
+    return rel_pivoted[['IID', *DEGREE_COLS]]
 
 
 def process_bafregress(paths: list[str]) -> pd.DataFrame:
@@ -145,12 +142,12 @@ def process_bafregress(paths: list[str]) -> pd.DataFrame:
 def main() -> None:
     """Parse arguments and run the QC merge pipeline."""
     parser = argparse.ArgumentParser(
-        description='Merge PLINK2 QC files and bafregress results into a CSV.',
+        description='Merge PLINK2 QC files, KING --ibdseg results, and bafregress into a CSV.',
     )
     parser.add_argument('--sexcheck', required=True, help='Path to .sexcheck file')
     parser.add_argument('--het', required=True, help='Path to .het file')
     parser.add_argument('--smiss', required=True, help='Path to .smiss file')
-    parser.add_argument('--kin0', required=True, help='Path to .kin0 file')
+    parser.add_argument('--seg', required=True, help='Path to KING --ibdseg autosomal .seg file')
     parser.add_argument('--output', required=True, help='Output CSV path')
     parser.add_argument(
         '--bafregress',
@@ -176,17 +173,11 @@ def main() -> None:
     merged = smiss.merge(het, on=merge_cols, suffixes=('', '_het'))
     merged = merged.merge(sexcheck, on=merge_cols, suffixes=('', '_sex'))
 
-    # Process kinship data
-    try:
-        kin_pivoted = process_kinship(args.kin0)
-        merged = merged.merge(kin_pivoted, on='IID', how='left')
-    except (OSError, ValueError, KeyError) as e:
-        print(f'Warning: Could not process kinship file: {e}')
-
-    # Ensure degree columns exist even if kinship processing was skipped
-    for col in DEGREE_COLS:
-        if col not in merged.columns:
-            merged[col] = pd.NA
+    # Process KING IBD-segment relatedness. Errors from process_seg propagate
+    # so the Batch job fails fast on a malformed .seg rather than emitting a
+    # silently-incomplete QC report.
+    seg_pivoted = process_seg(args.seg)
+    merged = merged.merge(seg_pivoted, on='IID', how='left')
 
     # Process bafregress files
     if args.bafregress:
