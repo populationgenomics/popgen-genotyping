@@ -158,6 +158,14 @@ def test_summarise_counts_match_filter_columns(egt_tsv: Path, vmiss_tsv: Path) -
     assert s['strand_ambiguous'] == 2  # rs2 + rs3
     assert s['fail_strand_filter'] == 2
     assert s['total_excluded'] + s['total_retained'] == s['total_variants']
+    # Priority cascade gentrain → cluster_sep → fmiss → strand: rs6 fails both
+    # gentrain and cluster_sep but is attributed only to gentrain.
+    assert s['first_fail_gentrain'] == 2  # rs4, rs6
+    assert s['first_fail_cluster_sep'] == 1  # rs5 (rs6 absorbed by gentrain)
+    assert s['first_fail_fmiss'] == 1  # rs7
+    assert s['first_fail_strand'] == 2  # rs2, rs3
+    cascade_keys = ('first_fail_gentrain', 'first_fail_cluster_sep', 'first_fail_fmiss', 'first_fail_strand')
+    assert sum(s[k] for k in cascade_keys) == s['total_excluded']
 
 
 def test_main_end_to_end(tmp_path: Path, egt_tsv: Path, vmiss_tsv: Path) -> None:

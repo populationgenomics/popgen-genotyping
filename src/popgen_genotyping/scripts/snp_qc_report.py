@@ -141,14 +141,33 @@ def apply_filters(
 def summarise(df: pd.DataFrame) -> pd.DataFrame:
     """Build a per-filter drop-count summary.
 
+    The output emits two complementary groups of per-filter rows:
+
+    * ``first_fail_<filter>`` — count of variants for which ``<filter>`` was
+      the first failing check in the priority cascade
+      ``gentrain → cluster_sep → fmiss → strand``. Disjoint across filters:
+      each excluded variant contributes to exactly one row, so the four
+      ``first_fail_*`` rows sum to ``total_excluded``.
+    * ``fail_<filter>`` — count of variants that fail ``<filter>`` regardless
+      of any other filter. Overlapping across filters; useful when tuning a
+      single threshold in isolation.
+
     Args:
         df: Annotated frame from :func:`apply_filters`.
 
     Returns:
         Two-column DataFrame (``metric``, ``value``) suitable for direct TSV write.
     """
+    first_fail_gentrain: pd.Series = ~df['pass_gentrain']
+    first_fail_cluster_sep: pd.Series = df['pass_gentrain'] & ~df['pass_cluster_sep']
+    first_fail_fmiss: pd.Series = df['pass_gentrain'] & df['pass_cluster_sep'] & ~df['pass_fmiss']
+    first_fail_strand: pd.Series = df['pass_gentrain'] & df['pass_cluster_sep'] & df['pass_fmiss'] & ~df['pass_strand']
     rows: list[tuple[str, int]] = [
         ('total_variants', len(df)),
+        ('first_fail_gentrain', int(first_fail_gentrain.sum())),
+        ('first_fail_cluster_sep', int(first_fail_cluster_sep.sum())),
+        ('first_fail_fmiss', int(first_fail_fmiss.sum())),
+        ('first_fail_strand', int(first_fail_strand.sum())),
         ('fail_gentrain', int((~df['pass_gentrain']).sum())),
         ('fail_cluster_sep', int((~df['pass_cluster_sep']).sum())),
         ('fail_fmiss', int((~df['pass_fmiss']).sum())),
