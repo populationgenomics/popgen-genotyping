@@ -31,8 +31,8 @@ def run_export_cohort_datasets(plink1_prefix_host: Path) -> Path:
     final_int: str = to_container(final_bcf)
 
     export_cmd: str = (
-        f"bash -c 'plink2 --bfile {plink1_int} --allow-extra-chr --make-pgen --out {plink2_int} && "
-        f'plink2 --pfile {plink2_int} --allow-extra-chr --export bcf --out {plink2_int} && '
+        f"bash -c 'plink2 --bfile {plink1_int} --allow-extra-chr --output-chr chrM --make-pgen --out {plink2_int} && "
+        f'plink2 --pfile {plink2_int} --allow-extra-chr --output-chr chrM --export bcf --out {plink2_int} && '
         f"mv {plink2_int}.bcf {final_int}'"
     )
     run_docker(PLINK_IMAGE, export_cmd)

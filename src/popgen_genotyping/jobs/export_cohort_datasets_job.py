@@ -73,6 +73,7 @@ def run_export_cohort_datasets(
         set -ex
         plink2 --bfile {plink_input} \\
             --allow-extra-chr \\
+            --output-chr chrM \\
             --make-pgen \\
             --export bcf ref-first \\
             --out {j.plink2_output}

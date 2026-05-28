@@ -78,6 +78,7 @@ def run_cohort_bcf_to_plink(
             --split-par hg38 \\
             --set-all-var-ids '@:#:$r:$a' \\
             --allow-extra-chr \\
+            --output-chr chrM \\
             {update_sex_cmd} \\
             --make-bed \\
             --out {j.output_plink}

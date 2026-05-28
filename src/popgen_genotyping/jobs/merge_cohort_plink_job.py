@@ -68,11 +68,15 @@ def run_merge_plink(
             to_path(remove_list_path).write_text('\n'.join([f'0\t{s}' for s in samples_to_remove]))
             samples_to_remove_resource = b.read_input(remove_list_path)
 
+            # --keep-allele-order: PLINK 1.9 otherwise resets A1 to the minor allele,
+            # diverging from the A1=ALT/A2=REF orientation that every other step
+            # (and any future reference-panel merge) relies on.
             j.command(
                 f"""
                 set -ex
-                plink --bfile {prev_resource} --allow-extra-chr --remove {samples_to_remove_resource} \\
-                    --make-bed --out {j.filtered_prev}
+                plink --bfile {prev_resource} --allow-extra-chr --output-chr chrM \\
+                    --remove {samples_to_remove_resource} \\
+                    --keep-allele-order --make-bed --out {j.filtered_prev}
                 """
             )
             staged_prefixes.append(str(j.filtered_prev))
@@ -107,9 +111,10 @@ def run_merge_plink(
             f"""
             plink --bfile {first_prefix} \
                 --allow-extra-chr \
+                --output-chr chrM \
                 --make-bed \
                 --keep-allele-order \
-                --out {j.output_plink}'
+                --out {j.output_plink}
             """
         )
     else:
@@ -123,6 +128,7 @@ def run_merge_plink(
             plink --bfile {first_prefix} \
                 --merge-list mergelist.txt \
                 --allow-extra-chr \
+                --output-chr chrM \
                 --make-bed \
                 --keep-allele-order \
                 --out {j.output_plink}

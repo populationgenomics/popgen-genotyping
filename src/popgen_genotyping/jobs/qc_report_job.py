@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
 def run_qc_report(
     plink_qc_prefix: str,
+    king_seg_path: str,
     bafregress_paths: list[str],
     output_path: str,
     job_name: str = 'qc_report',
@@ -24,6 +25,7 @@ def run_qc_report(
 
     Args:
         plink_qc_prefix: Cloud path prefix for PLINK2 QC files.
+        king_seg_path: Cloud path to the KING ``--ibdseg`` autosomal ``.seg``.
         bafregress_paths: Cloud paths to bafregress files for merging.
         output_path: Cloud path to output QC summary CSV.
         job_name: Name for the Hail Batch Job.
@@ -49,7 +51,7 @@ def run_qc_report(
     sexcheck_file = b.read_input(f'{plink_qc_prefix}.sexcheck')
     het_file = b.read_input(f'{plink_qc_prefix}.het')
     smiss_file = b.read_input(f'{plink_qc_prefix}.smiss')
-    kin0_file = b.read_input(f'{plink_qc_prefix}.kin0')
+    seg_file = b.read_input(king_seg_path)
 
     # Read in bafregress files
     bafregress_files = [b.read_input(path) for path in bafregress_paths]
@@ -68,7 +70,7 @@ def run_qc_report(
             --sexcheck {sexcheck_file} \
             --het {het_file} \
             --smiss {smiss_file} \
-            --kin0 {kin0_file} \
+            --seg {seg_file} \
             --output {j.output_csv.qc_report} \
             {bafregress_flag}
         """,
