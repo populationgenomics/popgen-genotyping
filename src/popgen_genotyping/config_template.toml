@@ -79,8 +79,6 @@ gentrain_min = 0.7
 cluster_sep_min = 0.4
 # F_MISS = 1 - call rate.
 fmiss_max = 0.02
-# Drop {A,T}/{C,G} SNPs (complementary alleles, cannot be strand-resolved).
-exclude_strand_ambiguous = true
 
 [popgen_genotyping.qc_report]
 cpu = 2

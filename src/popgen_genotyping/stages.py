@@ -403,7 +403,7 @@ class KingIbdseg(MultiCohortStage):
 )
 class SnpQcReport(MultiCohortStage):
     """
-    Per-SNP QC: vendor cluster scores + call rate + strand-ambiguity filter.
+    Per-SNP QC: vendor cluster scores + call rate.
 
     Joins the references-repo EGT INFO BCF (``GenTrain_Score`` / ``Cluster_Sep``)
     with the merged-set ``Plink2Qc`` ``.vmiss`` and applies the thresholds
@@ -436,10 +436,6 @@ class SnpQcReport(MultiCohortStage):
         gentrain_min: float = config_retrieve([*thresholds_path, 'gentrain_min'], 0.7)
         cluster_sep_min: float = config_retrieve([*thresholds_path, 'cluster_sep_min'], 0.4)
         fmiss_max: float = config_retrieve([*thresholds_path, 'fmiss_max'], 0.02)
-        exclude_strand_ambiguous: bool = config_retrieve(
-            [*thresholds_path, 'exclude_strand_ambiguous'],
-            True,
-        )
 
         egt_info_bcf_key: str = config_retrieve(
             [*stage_path, 'egt_info_bcf_reference_key'],
@@ -457,7 +453,6 @@ class SnpQcReport(MultiCohortStage):
             gentrain_min=gentrain_min,
             cluster_sep_min=cluster_sep_min,
             fmiss_max=fmiss_max,
-            exclude_strand_ambiguous=exclude_strand_ambiguous,
             output_audit_tsv_path=str(outputs['audit_tsv']),
             output_exclusion_list_path=str(outputs['exclusion_list']),
             output_summary_tsv_path=str(outputs['summary_tsv']),

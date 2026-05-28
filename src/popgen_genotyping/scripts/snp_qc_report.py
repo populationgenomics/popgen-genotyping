@@ -2,9 +2,9 @@
 
 Joins the Illumina EGT INFO TSV (extracted from the references-repo
 sample-less BCF) with the merged-set ``plink2 --missing`` per-variant output,
-applies four threshold filters (``GenTrain_Score``, ``Cluster_Sep``,
-``F_MISS``, and an optional ``{A,T}``/``{C,G}`` strand-ambiguity drop), and
-emits an exclusion ``.snplist`` plus an audit TSV and per-filter summary.
+applies three threshold filters (``GenTrain_Score``, ``Cluster_Sep``,
+``F_MISS``), and emits an exclusion ``.snplist`` plus an audit TSV and
+per-filter summary.
 """
 
 from __future__ import annotations
@@ -35,11 +35,9 @@ AUDIT_COLUMNS: list[str] = [
     'GenTrain_Score',
     'Cluster_Sep',
     'F_MISS',
-    'strand_ambiguous',
     'fail_gentrain',
     'fail_cluster_sep',
     'fail_fmiss',
-    'fail_strand',
     'fail',
 ]
 
@@ -82,35 +80,12 @@ def load_vmiss(path: Path) -> pd.DataFrame:
     return df[['ID', 'F_MISS']].copy()
 
 
-def add_strand_ambiguous_flag(df: pd.DataFrame) -> pd.DataFrame:
-    """Annotate ``df`` with a boolean ``strand_ambiguous`` column.
-
-    A SNP is strand-ambiguous iff its ``{REF, ALT}`` is ``{A, T}`` or ``{C, G}``.
-    Indels and missing alleles are never flagged.
-
-    Args:
-        df: Frame with ``REF`` and ``ALT`` string columns.
-
-    Returns:
-        Copy of ``df`` with a ``strand_ambiguous`` boolean column appended.
-    """
-    ref: pd.Series = df['REF'].astype('string').str.upper()
-    alt: pd.Series = df['ALT'].astype('string').str.upper()
-    snv: pd.Series = (ref.str.len() == 1) & (alt.str.len() == 1)
-    at: pd.Series = ((ref == 'A') & (alt == 'T')) | ((ref == 'T') & (alt == 'A'))
-    cg: pd.Series = ((ref == 'C') & (alt == 'G')) | ((ref == 'G') & (alt == 'C'))
-    out: pd.DataFrame = df.copy()
-    out['strand_ambiguous'] = (snv & (at | cg)).fillna(False).astype(bool)
-    return out
-
-
 def apply_filters(
     df: pd.DataFrame,
     *,
     gentrain_min: float,
     cluster_sep_min: float,
     fmiss_max: float,
-    exclude_strand_ambiguous: bool,
 ) -> pd.DataFrame:
     """Append per-filter and aggregate fail columns to ``df``.
 
@@ -118,25 +93,22 @@ def apply_filters(
     so the variant lands on the exclusion list rather than silently passing.
 
     Args:
-        df: Joined EGT + vmiss frame, already annotated with ``strand_ambiguous``.
+        df: Joined EGT + vmiss frame.
         gentrain_min: Inclusive lower bound for ``GenTrain_Score``.
         cluster_sep_min: Inclusive lower bound for ``Cluster_Sep``.
         fmiss_max: Inclusive upper bound for merged-set ``F_MISS``.
-        exclude_strand_ambiguous: If True, ``strand_ambiguous`` SNPs set
-            ``fail_strand``; otherwise the check is a no-op (always False).
 
     Returns:
-        Copy of ``df`` with five boolean columns: ``fail_gentrain``,
-        ``fail_cluster_sep``, ``fail_fmiss``, ``fail_strand``, ``fail``.
-        ``True`` indicates the variant failed that filter (or any filter, for
-        the aggregate ``fail`` column).
+        Copy of ``df`` with four boolean columns: ``fail_gentrain``,
+        ``fail_cluster_sep``, ``fail_fmiss``, ``fail``. ``True`` indicates
+        the variant failed that filter (or any filter, for the aggregate
+        ``fail`` column).
     """
     out: pd.DataFrame = df.copy()
     out['fail_gentrain'] = out['GenTrain_Score'].fillna(-1.0) < gentrain_min
     out['fail_cluster_sep'] = out['Cluster_Sep'].fillna(-1.0) < cluster_sep_min
     out['fail_fmiss'] = out['F_MISS'].fillna(1.0) > fmiss_max
-    out['fail_strand'] = out['strand_ambiguous'] if exclude_strand_ambiguous else False
-    out['fail'] = out['fail_gentrain'] | out['fail_cluster_sep'] | out['fail_fmiss'] | out['fail_strand']
+    out['fail'] = out['fail_gentrain'] | out['fail_cluster_sep'] | out['fail_fmiss']
     return out
 
 
@@ -147,8 +119,8 @@ def summarise(df: pd.DataFrame) -> pd.DataFrame:
 
     * ``first_fail_<filter>`` — count of variants for which ``<filter>`` was
       the first failing check in the priority cascade
-      ``gentrain → cluster_sep → fmiss → strand``. Disjoint across filters:
-      each excluded variant contributes to exactly one row, so the four
+      ``gentrain → cluster_sep → fmiss``. Disjoint across filters: each
+      excluded variant contributes to exactly one row, so the three
       ``first_fail_*`` rows sum to ``total_excluded``.
     * ``fail_<filter>`` — count of variants that fail ``<filter>`` regardless
       of any other filter. Overlapping across filters; useful when tuning a
@@ -163,20 +135,14 @@ def summarise(df: pd.DataFrame) -> pd.DataFrame:
     first_fail_gentrain: pd.Series = df['fail_gentrain']
     first_fail_cluster_sep: pd.Series = ~df['fail_gentrain'] & df['fail_cluster_sep']
     first_fail_fmiss: pd.Series = ~df['fail_gentrain'] & ~df['fail_cluster_sep'] & df['fail_fmiss']
-    first_fail_strand: pd.Series = (
-        ~df['fail_gentrain'] & ~df['fail_cluster_sep'] & ~df['fail_fmiss'] & df['fail_strand']
-    )
     rows: list[tuple[str, int]] = [
         ('total_variants', len(df)),
         ('first_fail_gentrain', int(first_fail_gentrain.sum())),
         ('first_fail_cluster_sep', int(first_fail_cluster_sep.sum())),
         ('first_fail_fmiss', int(first_fail_fmiss.sum())),
-        ('first_fail_strand', int(first_fail_strand.sum())),
         ('fail_gentrain', int(df['fail_gentrain'].sum())),
         ('fail_cluster_sep', int(df['fail_cluster_sep'].sum())),
         ('fail_fmiss', int(df['fail_fmiss'].sum())),
-        ('strand_ambiguous', int(df['strand_ambiguous'].sum())),
-        ('fail_strand_filter', int(df['fail_strand'].sum())),
         ('total_excluded', int(df['fail'].sum())),
         ('total_retained', int((~df['fail']).sum())),
     ]
@@ -222,11 +188,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument('--gentrain-min', type=float, required=True)
     p.add_argument('--cluster-sep-min', type=float, required=True)
     p.add_argument('--fmiss-max', type=float, required=True)
-    p.add_argument(
-        '--exclude-strand-ambiguous',
-        action='store_true',
-        help='Also exclude {A,T}/{C,G} SNPs that cannot be strand-resolved.',
-    )
     p.add_argument('--output-audit-tsv', type=Path, required=True)
     p.add_argument('--output-exclusion-list', type=Path, required=True)
     p.add_argument('--output-summary-tsv', type=Path, required=True)
@@ -246,13 +207,11 @@ def main(argv: list[str] | None = None) -> int:
     df_egt: pd.DataFrame = load_egt_info(args.egt_info_tsv)
     df_vmiss: pd.DataFrame = load_vmiss(args.merged_vmiss)
     df: pd.DataFrame = df_egt.merge(df_vmiss, on='ID', how='left')
-    df = add_strand_ambiguous_flag(df)
     df = apply_filters(
         df,
         gentrain_min=args.gentrain_min,
         cluster_sep_min=args.cluster_sep_min,
         fmiss_max=args.fmiss_max,
-        exclude_strand_ambiguous=args.exclude_strand_ambiguous,
     )
     write_outputs(
         df,

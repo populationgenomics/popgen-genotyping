@@ -34,7 +34,6 @@ def run_snp_qc_report(
     gentrain_min: float,
     cluster_sep_min: float,
     fmiss_max: float,
-    exclude_strand_ambiguous: bool,
     output_audit_tsv_path: str,
     output_exclusion_list_path: str,
     output_summary_tsv_path: str,
@@ -49,7 +48,6 @@ def run_snp_qc_report(
         gentrain_min: Inclusive lower bound for ``GenTrain_Score``.
         cluster_sep_min: Inclusive lower bound for ``Cluster_Sep``.
         fmiss_max: Inclusive upper bound for the merged-set ``F_MISS``.
-        exclude_strand_ambiguous: When True, also exclude ``{A,T}``/``{C,G}`` SNPs.
         output_audit_tsv_path: Output path for the bgzipped audit TSV.
         output_exclusion_list_path: Output path for the exclusion ``.snplist``.
         output_summary_tsv_path: Output path for the summary TSV.
@@ -109,8 +107,6 @@ def run_snp_qc_report(
         },
     )
 
-    strand_flag: str = '--exclude-strand-ambiguous' if exclude_strand_ambiguous else ''
-
     generate_snp_exclusion_list.command(
         f"""
         set -euxo pipefail
@@ -120,7 +116,6 @@ def run_snp_qc_report(
             --gentrain-min {gentrain_min} \\
             --cluster-sep-min {cluster_sep_min} \\
             --fmiss-max {fmiss_max} \\
-            {strand_flag} \\
             --output-audit-tsv {generate_snp_exclusion_list.outputs.audit_tsv_gz} \\
             --output-exclusion-list {generate_snp_exclusion_list.outputs.exclusion_list} \\
             --output-summary-tsv {generate_snp_exclusion_list.outputs.summary_tsv}
