@@ -111,8 +111,30 @@ class TestRunMergeWithReferencePanelCommand:
         assert 'count[$1' in normalize_section
         assert '$4' in normalize_section
         assert 'count[$1' in normalize_section and '> 1' in normalize_section
-        assert '--exclude duplicate_position_var_ids.txt' in normalize_section
         assert '--out normalized_cohort' in normalize_section
+
+    def test_normalize_step_drops_strand_ambiguous_sites(self) -> None:
+        """{A,T} and {C,G} variants are excluded before the merge.
+
+        FASTA-anchoring cannot resolve strand for these sites, so an
+        external panel could disagree on REF/ALT orientation; dropping
+        them is the safest pre-merge posture.
+        """
+        cmd: str = _capture_merge_with_reference_panel_command()
+        normalize_section = cmd.split('NormalizeCohort')[1].split('ValidateAgainstExpectations')[0]
+        assert 'strand_ambiguous_var_ids.txt' in normalize_section
+        assert '$5=="A" && $6=="T"' in normalize_section
+        assert '$5=="T" && $6=="A"' in normalize_section
+        assert '$5=="C" && $6=="G"' in normalize_section
+        assert '$5=="G" && $6=="C"' in normalize_section
+
+    def test_normalize_step_combines_exclude_lists(self) -> None:
+        """Duplicate-position and strand-ambiguous IDs are unioned for a single --exclude."""
+        cmd: str = _capture_merge_with_reference_panel_command()
+        normalize_section = cmd.split('NormalizeCohort')[1].split('ValidateAgainstExpectations')[0]
+        assert 'cat duplicate_position_var_ids.txt strand_ambiguous_var_ids.txt' in normalize_section
+        assert 'sort -u > normalize_exclude.txt' in normalize_section
+        assert '--exclude normalize_exclude.txt' in normalize_section
 
     def test_validate_step_asserts_both_sides(self) -> None:
         """Validation must check contig style + variant ID pattern on cohort AND reference."""
@@ -175,6 +197,8 @@ class TestRunMergeWithReferencePanelCommand:
         assert 'intersect_variants' in stats_section
         assert 'cohort_only_variants' in stats_section
         assert 'reference_only_variants' in stats_section
+        assert 'cohort_variants_dropped_duplicate_position' in stats_section
+        assert 'cohort_variants_dropped_strand_ambiguous' in stats_section
 
     def test_converts_final_output_to_plink2(self) -> None:
         """Final output is PLINK2 PGEN, written by plink2 --make-pgen."""

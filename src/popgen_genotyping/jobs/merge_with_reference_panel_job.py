@@ -30,12 +30,13 @@ def run_merge_with_reference_panel(
     Merge a cohort PLINK2 aggregate with an external reference panel.
 
     Cohort PGEN is round-tripped to PLINK 1.9, then FASTA-anchored
-    (`--ref-from-fa force`), restricted to bi-allelic ACGT SNPs, and given
-    `chr:pos:ref:alt` variant IDs. Contig style and variant-ID pattern are
-    asserted against config on both sides. The intersect is computed by ID
-    hash across the two BIMs; both sides are pre-filtered with
-    `plink --extract` and joined with a single `plink --bmerge`. Final
-    output is PLINK2.
+    (`--ref-from-fa force`), restricted to bi-allelic ACGT SNPs, given
+    `chr:pos:ref:alt` variant IDs, and stripped of strand-ambiguous
+    ({A,T} / {C,G}) sites and any position with more than one record.
+    Contig style and variant-ID pattern are asserted against config on
+    both sides. The intersect is computed by ID hash across the two BIMs;
+    both sides are pre-filtered with `plink --extract` and joined with a
+    single `plink --bmerge`. Final output is PLINK2.
 
     Args:
         cohort_pgen_paths (dict[str, str]): Cohort PLINK2 fileset paths
@@ -97,9 +98,9 @@ def run_merge_with_reference_panel(
         set -ex
 
         # ---- ConvertCohortToPlink1 -------------------------------------------
-        # PGEN → PLINK 1.9. The rest of the merge runs in PLINK 1.9, and
-        # NormalizeCohort re-anchors REF/ALT, so no need to preserve PGEN's
-        # native orientation.
+        # PGEN → PLINK 1.9. The rest of the merge runs in PLINK 1.9, and the
+        # next step re-anchors REF/ALT against the FASTA, so no need to
+        # preserve PGEN's native orientation through the round-trip.
         plink2 --pfile {cohort_input} \\
             --allow-extra-chr \\
             --make-bed --out cohort_plink1
@@ -120,17 +121,31 @@ def run_merge_with_reference_panel(
             --allow-extra-chr \\
             --make-bed --out normalized_cohort_pre_dedup
 
-        # Pass 2: drop every variant at any position with more than one record.
-        # `--rm-dup` keys off variant IDs and would miss e.g. (A,C) and (A,T)
-        # at the same coordinate, both of which break `plink --bmerge`. awk
-        # keys off chr+pos and emits every ID at any duplicated position so
-        # the next `--exclude` removes the whole group.
+        # Pass 2: drop variants that would corrupt the merge.
+        #
+        # 1. Every variant at any position with more than one record.
+        #    `--rm-dup` keys off variant IDs and would miss e.g. (A,C) and
+        #    (A,T) at the same coordinate, both of which break the merge
+        #    step. awk keys off chr+pos and emits every ID at any
+        #    duplicated position.
+        # 2. Strand-ambiguous sites: {{A,T}} and {{C,G}} have identical
+        #    REF/ALT under strand-flip, so FASTA-anchoring cannot resolve
+        #    whether the cohort and the reference panel called them on the
+        #    same strand. Drop them rather than risk a silent flip.
         awk 'NR==FNR {{count[$1"\\t"$4]++; next}} count[$1"\\t"$4] > 1 {{print $2}}' \\
             normalized_cohort_pre_dedup.bim normalized_cohort_pre_dedup.bim \\
             > duplicate_position_var_ids.txt
 
+        awk '
+            ($5=="A" && $6=="T") || ($5=="T" && $6=="A") ||
+            ($5=="C" && $6=="G") || ($5=="G" && $6=="C") {{print $2}}
+        ' normalized_cohort_pre_dedup.bim > strand_ambiguous_var_ids.txt
+
+        cat duplicate_position_var_ids.txt strand_ambiguous_var_ids.txt \\
+            | sort -u > normalize_exclude.txt
+
         plink2 --bfile normalized_cohort_pre_dedup \\
-            --exclude duplicate_position_var_ids.txt \\
+            --exclude normalize_exclude.txt \\
             --allow-extra-chr \\
             --make-bed --out normalized_cohort
 
@@ -158,7 +173,7 @@ def run_merge_with_reference_panel(
         # Intersect the two BIMs by variant ID. Both sides use the
         # FASTA-anchored chr:pos:ref:alt ID scheme (asserted above), so an
         # ID match implies an allele match; pre-filtering to the intersect
-        # avoids allele-set conflicts in `plink --bmerge`.
+        # avoids allele-set conflicts at merge time.
         awk 'NR==FNR {{ref[$2]=1; next}} ($2 in ref) {{print $2}}' \\
             {reference_input.bim} normalized_cohort.bim > common.ids
 
@@ -187,6 +202,7 @@ def run_merge_with_reference_panel(
         # ---- Stats -----------------------------------------------------------
         cohort_pre_dedup_n=$(wc -l < normalized_cohort_pre_dedup.bim)
         cohort_dup_position_n=$(wc -l < duplicate_position_var_ids.txt)
+        cohort_strand_ambig_n=$(wc -l < strand_ambiguous_var_ids.txt)
         cohort_n=$(wc -l < normalized_cohort.bim)
         ref_n=$(wc -l < {reference_input.bim})
         intersect_n=$(wc -l < common.ids)
@@ -197,6 +213,7 @@ def run_merge_with_reference_panel(
             printf 'metric\\tvalue\\n'
             printf 'cohort_variants_post_snp_filter\\t%s\\n' "$cohort_pre_dedup_n"
             printf 'cohort_variants_dropped_duplicate_position\\t%s\\n' "$cohort_dup_position_n"
+            printf 'cohort_variants_dropped_strand_ambiguous\\t%s\\n' "$cohort_strand_ambig_n"
             printf 'cohort_variants_pre_merge\\t%s\\n' "$cohort_n"
             printf 'reference_variants_pre_merge\\t%s\\n' "$ref_n"
             printf 'intersect_variants\\t%s\\n' "$intersect_n"
