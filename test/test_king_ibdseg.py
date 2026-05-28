@@ -226,11 +226,15 @@ class TestKingIbdsegQueueJobs:
         }
         # `as_path_by_target` returns dict[Target, Path]; iteration order
         # determines the order of bafregress_paths handed to the filter job.
+        # We pass plain strings here rather than `pathlib.Path('gs://...')`
+        # because pathlib collapses the `gs://` double slash to `gs:/`, which
+        # production never does (it sees `cpg_utils.Path = CloudPath | Path`,
+        # and `str(...)` on a CloudPath preserves the scheme prefix).
         target_a = MagicMock(name='target_a')
         target_b = MagicMock(name='target_b')
-        bafregress_paths_by_target: dict[MagicMock, Path] = {
-            target_a: Path('gs://cohorts/a/baf.tsv'),
-            target_b: Path('gs://cohorts/b/baf.tsv'),
+        bafregress_paths_by_target: dict[MagicMock, str] = {
+            target_a: 'gs://cohorts/a/baf.tsv',
+            target_b: 'gs://cohorts/b/baf.tsv',
         }
         mock_inputs = MagicMock()
         mock_inputs.as_dict.return_value = merged_plink

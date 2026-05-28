@@ -89,11 +89,15 @@ def _capture_filter_command(
 
 
 def _strip_plink_invocation(cmd: str, replacement: str = ':') -> str:
-    """Replace ``plink --bfile ... --out <prefix>`` with ``replacement``.
+    """Replace the trailing ``plink --bfile ...`` invocation with ``replacement``.
 
     The pytest env has no plink binary and we only need to inspect the
     remove-list construction; the plink ``--make-bed`` is a no-op for these
-    tests.
+    tests. The plink call is the last command in the queued bash, so we
+    consume from ``plink --bfile`` to end-of-string — that avoids depending
+    on the formatted form of the input/output ResourceGroup references
+    (Hail Batch's deferred-substitution placeholders contain spaces and
+    angle brackets when fixture mocks fall back to their default repr).
 
     Args:
         cmd (str): The full bash command captured from run_plink_filter_for_king.
@@ -103,7 +107,7 @@ def _strip_plink_invocation(cmd: str, replacement: str = ':') -> str:
         str: The bash command with the plink invocation replaced.
     """
     new, n = re.subn(
-        r'plink\s+--bfile\b.*?--out\s+\S+',
+        r'plink\s+--bfile\b.*\Z',
         replacement,
         cmd,
         count=1,
