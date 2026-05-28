@@ -435,6 +435,10 @@ class MergeWithReferencePanel(MultiCohortStage):
         cohort_cfg: dict[str, str] = config_retrieve(['popgen_genotyping', 'references', 'cohort_aggregate'])
         ref_cfg: dict[str, str] = config_retrieve(['popgen_genotyping', 'references', 'reference_panel'])
         fasta_ref: str = config_retrieve(['popgen_genotyping', 'references', 'fasta_ref_path'])
+        drop_strand_ambiguous: bool = config_retrieve(
+            ['popgen_genotyping', 'merge_with_reference_panel', 'drop_strand_ambiguous'],
+            True,
+        )
 
         j: BashJob = run_merge_with_reference_panel(
             cohort_pgen_paths={
@@ -453,6 +457,7 @@ class MergeWithReferencePanel(MultiCohortStage):
             output_pgen_prefix=str(outputs['pgen']).removesuffix('.pgen'),
             output_log_path=str(outputs['log']),
             output_stats_path=str(outputs['stats']),
+            drop_strand_ambiguous=drop_strand_ambiguous,
             job_name=f'MergeWithReferencePanel_{multicohort.name}',
         )
 

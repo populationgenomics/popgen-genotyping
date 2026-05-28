@@ -12,11 +12,15 @@ from popgen_genotyping.stages import MergeWithReferencePanel
 # -- Helpers ------------------------------------------------------------------
 
 
-def _capture_merge_with_reference_panel_command() -> str:
+def _capture_merge_with_reference_panel_command(*, drop_strand_ambiguous: bool = True) -> str:
     """Invoke run_merge_with_reference_panel with mocked Hail Batch; return the queued bash.
 
+    Args:
+        drop_strand_ambiguous: Forwarded to the production function so tests
+            can assert both branches of the strand-ambiguity toggle.
+
     Returns:
-        str: The single bash command string the production code queued.
+        The single bash command string the production code queued.
     """
     mock_batch = MagicMock()
     mock_job = MagicMock()
@@ -47,6 +51,7 @@ def _capture_merge_with_reference_panel_command() -> str:
             output_pgen_prefix='gs://o/merged',
             output_log_path='gs://o/merged.log',
             output_stats_path='gs://o/merged_stats.tsv',
+            drop_strand_ambiguous=drop_strand_ambiguous,
         )
 
     return mock_job.command.call_args[0][0]
@@ -113,20 +118,28 @@ class TestRunMergeWithReferencePanelCommand:
         assert 'count[$1' in normalize_section and '> 1' in normalize_section
         assert '--out normalized_cohort' in normalize_section
 
-    def test_normalize_step_drops_strand_ambiguous_sites(self) -> None:
-        """{A,T} and {C,G} variants are excluded before the merge.
-
-        FASTA-anchoring cannot resolve strand for these sites, so an
-        external panel could disagree on REF/ALT orientation; dropping
-        them is the safest pre-merge posture.
-        """
-        cmd: str = _capture_merge_with_reference_panel_command()
+    def test_normalize_step_drops_strand_ambiguous_sites_when_enabled(self) -> None:
+        """With drop_strand_ambiguous=True, {A,T} and {C,G} IDs are gathered for exclusion."""
+        cmd: str = _capture_merge_with_reference_panel_command(drop_strand_ambiguous=True)
         normalize_section = cmd.split('NormalizeCohort')[1].split('ValidateAgainstExpectations')[0]
+        assert 'if [ "true" = "true" ]' in normalize_section
         assert 'strand_ambiguous_var_ids.txt' in normalize_section
         assert '$5=="A" && $6=="T"' in normalize_section
         assert '$5=="T" && $6=="A"' in normalize_section
         assert '$5=="C" && $6=="G"' in normalize_section
         assert '$5=="G" && $6=="C"' in normalize_section
+
+    def test_normalize_step_warns_and_skips_strand_filter_when_disabled(self) -> None:
+        """With drop_strand_ambiguous=False, the awk pass is skipped and a warning is emitted.
+
+        The exclude list still needs to exist (it's concatenated unconditionally
+        below) so the bash truncates it to empty rather than omitting it.
+        """
+        cmd: str = _capture_merge_with_reference_panel_command(drop_strand_ambiguous=False)
+        normalize_section = cmd.split('NormalizeCohort')[1].split('ValidateAgainstExpectations')[0]
+        assert 'if [ "false" = "true" ]' in normalize_section
+        assert 'WARNING: drop_strand_ambiguous=false' in normalize_section
+        assert ': > strand_ambiguous_var_ids.txt' in normalize_section
 
     def test_normalize_step_combines_exclude_lists(self) -> None:
         """Duplicate-position and strand-ambiguous IDs are unioned for a single --exclude."""
@@ -282,14 +295,16 @@ class TestMergeWithReferencePanelQueueJobs:
             'expected_variant_id_pattern': '^chr[0-9XYM]+:[0-9]+:[ACGT]+:[ACGT]+$',
         }
 
-        def fake_config_retrieve(path: list[str], default: object = None) -> object:  # noqa: ARG001
-            """Return the cohort_aggregate / reference_panel sub-dict, or the FASTA path."""
+        def fake_config_retrieve(path: list[str], default: object = None) -> object:
+            """Return the cohort_aggregate / reference_panel sub-dict, the FASTA path, or the toggle."""
             if path == ['popgen_genotyping', 'references', 'cohort_aggregate']:
                 return cohort_cfg
             if path == ['popgen_genotyping', 'references', 'reference_panel']:
                 return ref_cfg
             if path == ['popgen_genotyping', 'references', 'fasta_ref_path']:
                 return 'gs://r/genome.fasta'
+            if path == ['popgen_genotyping', 'merge_with_reference_panel', 'drop_strand_ambiguous']:
+                return default
             return None
 
         with (
@@ -319,6 +334,7 @@ class TestMergeWithReferencePanelQueueJobs:
             output_pgen_prefix='/out/x',
             output_log_path='/out/x.log',
             output_stats_path='/out/x_stats.tsv',
+            drop_strand_ambiguous=True,
             job_name='MergeWithReferencePanel_my_multicohort',
         )
 
@@ -328,3 +344,45 @@ class TestMergeWithReferencePanelQueueJobs:
             data=expected_outputs,
             jobs=[mock_run.return_value],
         )
+
+    def test_drop_strand_ambiguous_config_override_is_plumbed_through(self) -> None:
+        """A config override of `drop_strand_ambiguous=False` reaches the job factory."""
+        mock_multicohort = MagicMock()
+        mock_multicohort.name = 'my_multicohort'
+        mock_inputs = MagicMock()
+
+        mock_self = MagicMock()
+        mock_self.expected_outputs.return_value = {
+            'pgen': Path('/out/x.pgen'),
+            'pvar': Path('/out/x.pvar'),
+            'psam': Path('/out/x.psam'),
+            'log': Path('/out/x.log'),
+            'stats': Path('/out/x_stats.tsv'),
+        }
+
+        def fake_config_retrieve(path: list[str], default: object = None) -> object:  # noqa: ARG001
+            """Return a False override only for the toggle, sensible stubs otherwise."""
+            if path == ['popgen_genotyping', 'merge_with_reference_panel', 'drop_strand_ambiguous']:
+                return False
+            if path == ['popgen_genotyping', 'references', 'cohort_aggregate']:
+                return {'pgen_path': 'p', 'pvar_path': 'v', 'psam_path': 's'}
+            if path == ['popgen_genotyping', 'references', 'reference_panel']:
+                return {
+                    'bed_path': 'b',
+                    'bim_path': 'i',
+                    'fam_path': 'f',
+                    'panel_id': 'pid',
+                    'expected_contig_style': 'with_chr',
+                    'expected_variant_id_pattern': 'x',
+                }
+            if path == ['popgen_genotyping', 'references', 'fasta_ref_path']:
+                return 'fa'
+            return None
+
+        with (
+            patch('popgen_genotyping.stages.run_merge_with_reference_panel') as mock_run,
+            patch('popgen_genotyping.stages.config_retrieve', side_effect=fake_config_retrieve),
+        ):
+            MergeWithReferencePanel.queue_jobs(mock_self, mock_multicohort, mock_inputs)
+
+        assert mock_run.call_args.kwargs['drop_strand_ambiguous'] is False

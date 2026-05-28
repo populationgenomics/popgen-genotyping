@@ -24,6 +24,7 @@ def run_merge_with_reference_panel(
     output_pgen_prefix: str,
     output_log_path: str,
     output_stats_path: str,
+    drop_strand_ambiguous: bool = True,
     job_name: str = 'merge_with_reference_panel',
 ) -> BashJob:
     """
@@ -31,12 +32,14 @@ def run_merge_with_reference_panel(
 
     Cohort PGEN is round-tripped to PLINK 1.9, then FASTA-anchored
     (`--ref-from-fa force`), restricted to bi-allelic ACGT SNPs, given
-    `chr:pos:ref:alt` variant IDs, and stripped of strand-ambiguous
-    ({A,T} / {C,G}) sites and any position with more than one record.
-    Contig style and variant-ID pattern are asserted against config on
-    both sides. The intersect is computed by ID hash across the two BIMs;
-    both sides are pre-filtered with `plink --extract` and joined with a
-    single `plink --bmerge`. Final output is PLINK2.
+    `chr:pos:ref:alt` variant IDs, and stripped of any position with more
+    than one record. When `drop_strand_ambiguous` is true (default),
+    strand-ambiguous ({A,T} / {C,G}) sites are also dropped; disabling
+    that emits a runtime warning to stderr. Contig style and variant-ID
+    pattern are asserted against config on both sides. The intersect is
+    computed by ID hash across the two BIMs; both sides are pre-filtered
+    with `plink --extract` and joined with a single `plink --bmerge`.
+    Final output is PLINK2.
 
     Args:
         cohort_pgen_paths (dict[str, str]): Cohort PLINK2 fileset paths
@@ -53,11 +56,16 @@ def run_merge_with_reference_panel(
             (writes `.pgen`, `.pvar`, `.psam`).
         output_log_path (str): Cloud path for the captured merge log.
         output_stats_path (str): Cloud path for the variant-intersection stats TSV.
+        drop_strand_ambiguous (bool): When True (default), drop {A,T} / {C,G}
+            sites before intersection. When False, retain them and emit a
+            stderr warning — only safe when both sides share a strand
+            convention.
         job_name (str): Name for the Hail Batch job.
 
     Returns:
         BashJob: The queued Hail Batch job.
     """
+    strand_filter_enabled: str = 'true' if drop_strand_ambiguous else 'false'
     b = get_batch()
     j = register_job(
         batch=b,
@@ -131,15 +139,23 @@ def run_merge_with_reference_panel(
         # 2. Strand-ambiguous sites: {{A,T}} and {{C,G}} have identical
         #    REF/ALT under strand-flip, so FASTA-anchoring cannot resolve
         #    whether the cohort and the reference panel called them on the
-        #    same strand. Drop them rather than risk a silent flip.
+        #    same strand. Dropping them is the safe default; the toggle is
+        #    for the case where both sides are known to share a strand
+        #    convention.
         awk 'NR==FNR {{count[$1"\\t"$4]++; next}} count[$1"\\t"$4] > 1 {{print $2}}' \\
             normalized_cohort_pre_dedup.bim normalized_cohort_pre_dedup.bim \\
             > duplicate_position_var_ids.txt
 
-        awk '
-            ($5=="A" && $6=="T") || ($5=="T" && $6=="A") ||
-            ($5=="C" && $6=="G") || ($5=="G" && $6=="C") {{print $2}}
-        ' normalized_cohort_pre_dedup.bim > strand_ambiguous_var_ids.txt
+        if [ "{strand_filter_enabled}" = "true" ]; then
+            awk '
+                ($5=="A" && $6=="T") || ($5=="T" && $6=="A") ||
+                ($5=="C" && $6=="G") || ($5=="G" && $6=="C") {{print $2}}
+            ' normalized_cohort_pre_dedup.bim > strand_ambiguous_var_ids.txt
+        else
+            echo "WARNING: drop_strand_ambiguous=false — {{A,T}} / {{C,G}} sites retained;" \\
+                "merge may produce silent strand-flips if the panel uses a different convention" >&2
+            : > strand_ambiguous_var_ids.txt
+        fi
 
         cat duplicate_position_var_ids.txt strand_ambiguous_var_ids.txt \\
             | sort -u > normalize_exclude.txt

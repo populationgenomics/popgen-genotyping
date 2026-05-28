@@ -63,6 +63,11 @@ storage = '50G'
 cpu = 4
 memory = 'highmem'
 storage = '100G'
+# Drop {A,T} / {C,G} sites before intersection. FASTA-anchoring cannot
+# resolve strand for these variants, so retaining them risks silent allele
+# flips if the cohort and panel disagree on strand convention. Set to false
+# only when both sides are known to share a convention.
+drop_strand_ambiguous = true
 
 [popgen_genotyping.qc_report]
 cpu = 2
