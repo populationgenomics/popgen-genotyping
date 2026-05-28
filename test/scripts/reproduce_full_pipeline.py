@@ -45,7 +45,7 @@ def main() -> None:
     heavy_bcf_host, light_bcf_host = run_gtc_to_bcfs(samples, gtc_paths_int)
 
     # 3. Stage: BafRegress
-    _baf_out_host = run_bafregress(heavy_bcf_host, af_ref_int)
+    baf_out_host = run_bafregress(heavy_bcf_host, af_ref_int)
 
     # 4. Stage: CohortBcfToPlink
     plink1_prefix_host = run_cohort_bcf_to_plink(samples, light_bcf_host, sex_mapping)
@@ -53,8 +53,9 @@ def main() -> None:
     # 5. Stage: ExportCohortDatasets
     _final_bcf_host = run_export_cohort_datasets(plink1_prefix_host)
 
-    # 6. Stage: KingIbdseg (runs against the merged PLINK 1.9 dataset).
-    king_outputs = run_king_ibdseg(plink1_prefix_host)
+    # 6. Stage: KingIbdseg (runs against the merged PLINK 1.9 dataset; uses the
+    #    BAFRegress output to exclude contaminated samples before IBD inference).
+    king_outputs = run_king_ibdseg(plink1_prefix_host, [baf_out_host])
     print('\nKING outputs:')
     for key, path in king_outputs.items():
         exists = 'OK' if path.exists() else 'MISSING'

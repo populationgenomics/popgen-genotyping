@@ -13,6 +13,7 @@ from popgen_genotyping.utils import register_job
 
 if TYPE_CHECKING:
     from hailtop.batch.job import BashJob
+    from hailtop.batch.resource import ResourceGroup
 
 
 # Header for the autosomal pairwise IBD summary (KING --ibdseg).
@@ -26,9 +27,7 @@ _X_SEG_HEADER: str = 'FID1\tID1\tFID2\tID2\tSex1\tSex2\tMaxIBD1\tMaxIBD2\tIBD1Se
 
 
 def run_king_ibdseg(
-    bed_path: str,
-    bim_path: str,
-    fam_path: str,
+    plink_input: ResourceGroup,
     output_seg_path: str,
     output_segments_path: str,
     output_seg_x_path: str,
@@ -49,10 +48,14 @@ def run_king_ibdseg(
     Manichaikul et al. (2010) doi:10.1093/bioinformatics/btq559; Chen et al.
     (2024).
 
+    Contamination filtering is performed upstream by
+    ``run_plink_filter_for_king``; this job takes the already-filtered fileset
+    as a Hail Batch ResourceGroup so no GCS round-trip is needed between the
+    filter and KING stages.
+
     Args:
-        bed_path: Cloud path to the PLINK 1.9 .bed file.
-        bim_path: Cloud path to the PLINK 1.9 .bim file.
-        fam_path: Cloud path to the PLINK 1.9 .fam file.
+        plink_input: Hail Batch ResourceGroup with ``bed``/``bim``/``fam`` keys
+            for the contamination-filtered PLINK 1.9 fileset.
         output_seg_path: Cloud path for the autosomal .seg pairwise summary.
         output_segments_path: Cloud path for the autosomal .segments.gz detail.
         output_seg_x_path: Cloud path for the X-chr .seg pairwise summary.
@@ -74,8 +77,6 @@ def run_king_ibdseg(
         default_storage='50G',
     )
 
-    plink_input = b.read_input_group(bed=bed_path, bim=bim_path, fam=fam_path)
-
     j.declare_resource_group(
         king_outputs={
             'seg': '{root}.seg',
@@ -92,9 +93,11 @@ def run_king_ibdseg(
     # succeeds and downstream stages see a well-formed (header-only) table.
     j.command(
         f"""
-        set -ex
+        set -euo pipefail
+
         king -b {plink_input.bed} --ibdseg --degree 3 --cpus $(nproc) \\
             --prefix {j.king_outputs} 2>&1 | tee {j.king_outputs.log}
+
         if [ ! -s {j.king_outputs.seg} ]; then
             printf '%s\\n' '{_AUTOSOME_SEG_HEADER}' > {j.king_outputs.seg}
         fi
