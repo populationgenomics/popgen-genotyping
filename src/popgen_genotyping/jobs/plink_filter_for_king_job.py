@@ -119,9 +119,16 @@ def run_plink_filter_for_king(
         done
         sort -u good_iids.txt -o good_iids.txt
 
-        # remove = samples in .fam whose IID is not in good_iids.
-        awk 'NR==FNR{{good[$1]=1; next}} !($2 in good) {{print $1"\\t"$2}}' \\
-            good_iids.txt all_samples.tsv > remove_samples.tsv
+        # remove = samples in .fam whose IID is not in good_iids. Load the
+        # good-list in BEGIN via getline so an empty file (every sample failed
+        # BAFRegress) still drops every sample; the NR==FNR idiom would
+        # otherwise silently treat all_samples.tsv as the good-list.
+        awk 'BEGIN {{
+                while ((getline g < "good_iids.txt") > 0) good[g] = 1
+                close("good_iids.txt")
+            }}
+            !($2 in good) {{ print $1"\\t"$2 }}' \\
+            all_samples.tsv > remove_samples.tsv
 
         n_total=$(wc -l < all_samples.tsv)
         n_remove=$(wc -l < remove_samples.tsv)
