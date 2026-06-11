@@ -35,9 +35,17 @@ def run_king_ibdseg(
     output_segments_x_path: str,
     output_log_path: str,
     job_name: str = 'king_ibdseg',
-) -> BashJob:
+) -> list[BashJob]:
     """
     Run KING `--ibdseg` on a merged PLINK 1.9 dataset.
+
+    Two jobs are queued. The merged ``.bim`` carries hg38 ``chr``-prefixed contig
+    names (``MergeCohortPlink`` emits ``--output-chr chrM``); KING only parses
+    numeric chromosome codes and discards everything else as "other", so a
+    ``chr``-prefixed input leaves it with zero autosomal SNPs. The first job runs
+    ``plink2 --output-chr 26`` to recode the fileset to numeric codes (``23``=X,
+    ``24``=Y, ``25``=XY, ``26``=MT) that KING recognises; the second runs KING
+    against that recoded fileset.
 
     KING 2.3.2 writes at the chosen prefix: ``{prefix}.seg`` (autosomal pairwise
     IBD summary), ``{prefix}.segments.gz`` (autosomal per-segment detail) and a
@@ -61,9 +69,43 @@ def run_king_ibdseg(
         job_name: Name for the Hail Batch job.
 
     Returns:
-        The queued Hail Batch BashJob.
+        The queued jobs in dependency order: ``[recode, king]``.
     """
     b = get_batch()
+
+    # Job 1: recode chromosomes to the numeric codes KING parses. plink2 reads
+    # the chr-prefixed input natively (plink 1.9 would treat each chr-prefixed
+    # code as an unmappable extra contig); --output-chr 26 emits 1-22, 23=X,
+    # 24=Y, 25=XY, 26=MT. The recoded fileset is consumed in-batch by KING and
+    # is not written to cloud.
+    recode = register_job(
+        batch=b,
+        job_name=f'{job_name}_recode',
+        config_path=['popgen_genotyping', 'king_ibdseg'],
+        image=config_retrieve(['workflow', 'plink_image']),
+        default_cpu=2,
+        default_storage='50G',
+    )
+    plink_input = b.read_input_group(bed=bed_path, bim=bim_path, fam=fam_path)
+    recode.declare_resource_group(
+        recoded={
+            'bed': '{root}.bed',
+            'bim': '{root}.bim',
+            'fam': '{root}.fam',
+        },
+    )
+    recode.command(
+        f"""
+        set -ex
+        plink2 --bfile {plink_input} \\
+            --allow-extra-chr \\
+            --output-chr 26 \\
+            --make-bed \\
+            --out {recode.recoded}
+        """,
+    )
+
+    # Job 2: KING --ibdseg against the recoded (numeric-chromosome) fileset.
     j = register_job(
         batch=b,
         job_name=job_name,
@@ -73,8 +115,7 @@ def run_king_ibdseg(
         default_memory='highmem',
         default_storage='50G',
     )
-
-    plink_input = b.read_input_group(bed=bed_path, bim=bim_path, fam=fam_path)
+    j.depends_on(recode)
 
     j.declare_resource_group(
         king_outputs={
@@ -93,7 +134,7 @@ def run_king_ibdseg(
     j.command(
         f"""
         set -ex
-        king -b {plink_input.bed} --ibdseg --degree 3 --cpus $(nproc) \\
+        king -b {recode.recoded.bed} --ibdseg --degree 3 --cpus $(nproc) \\
             --prefix {j.king_outputs} 2>&1 | tee {j.king_outputs.log}
         if [ ! -s {j.king_outputs.seg} ]; then
             printf '%s\\n' '{_AUTOSOME_SEG_HEADER}' > {j.king_outputs.seg}
@@ -116,4 +157,4 @@ def run_king_ibdseg(
     b.write_output(j.king_outputs.segments_gz_x, output_segments_x_path)
     b.write_output(j.king_outputs.log, output_log_path)
 
-    return j
+    return [recode, j]

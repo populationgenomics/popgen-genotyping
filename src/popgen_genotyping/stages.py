@@ -381,7 +381,7 @@ class KingIbdseg(MultiCohortStage):
 
         merged_plink: dict[str, Path] = inputs.as_dict(target=multicohort, stage=MergeCohortPlink)
 
-        j: BashJob = run_king_ibdseg(
+        jobs: list[BashJob] = run_king_ibdseg(
             bed_path=str(merged_plink['bed']),
             bim_path=str(merged_plink['bim']),
             fam_path=str(merged_plink['fam']),
@@ -393,7 +393,7 @@ class KingIbdseg(MultiCohortStage):
             job_name=f'KingIbdseg_{multicohort.name}',
         )
 
-        return self.make_outputs(multicohort, data=outputs, jobs=[j])
+        return self.make_outputs(multicohort, data=outputs, jobs=jobs)
 
 
 @stage(
