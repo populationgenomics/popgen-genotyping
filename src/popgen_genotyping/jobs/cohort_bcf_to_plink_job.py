@@ -24,6 +24,12 @@ def run_cohort_bcf_to_plink(
     """
     Directly convert a multi-sample cohort BCF to PLINK 1.9 format using PLINK2.
 
+    Variant IDs are set to ``CHROM:POS:REF:ALT`` and any that then collide
+    (Illumina arrays carry the same variant on multiple probes) are dropped
+    outright with ``--rm-dup exclude-all`` — no copy of a duplicated ID is
+    retained, so the merged dataset, the released PGEN, and every QC stage see a
+    unique-ID variant set.
+
     Args:
         bcf_path (str): Cloud path to the cohort-level multi-sample BCF.
         output_prefix (str): Cloud prefix for the output PLINK 1.9 files.
@@ -77,6 +83,7 @@ def run_cohort_bcf_to_plink(
             --max-alleles 2 \\
             --split-par hg38 \\
             --set-all-var-ids '@:#:$r:$a' \\
+            --rm-dup exclude-all \\
             --allow-extra-chr \\
             --output-chr chrM \\
             {update_sex_cmd} \\

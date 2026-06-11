@@ -19,18 +19,19 @@ from popgen_genotyping.stages import KingIbdseg, MergeCohortPlink
 # -- Helpers ------------------------------------------------------------------
 
 
-def _capture_run_king_ibdseg_command(tmp_path: Path) -> tuple[str, dict[str, Path]]:
-    """Invoke run_king_ibdseg with mocked Hail Batch; return (queued bash, tmp output paths).
+def _capture_run_king_ibdseg_command(tmp_path: Path) -> tuple[str, str, dict[str, Path]]:
+    """Invoke run_king_ibdseg with mocked Hail Batch; return the two queued commands.
 
-    The five KING resource-group outputs are wired to paths under tmp_path so
-    that executing the captured command writes to a real local directory.
+    run_king_ibdseg queues two jobs (a plink2 chromosome recode, then KING). The
+    five KING resource-group outputs are wired to paths under tmp_path so that
+    executing the captured KING command writes to a real local directory.
 
     Args:
         tmp_path (Path): pytest tmp_path fixture; root for the simulated KING outputs.
 
     Returns:
-        tuple[str, dict[str, Path]]: The bash string the production code queued,
-            plus the resource-group key -> local file path mapping.
+        tuple[str, str, dict[str, Path]]: the recode bash string, the KING bash
+            string, and the KING resource-group key -> local file path mapping.
     """
     outputs: dict[str, Path] = {
         'seg': tmp_path / 'k.seg',
@@ -41,20 +42,19 @@ def _capture_run_king_ibdseg_command(tmp_path: Path) -> tuple[str, dict[str, Pat
     }
 
     mock_batch = MagicMock()
-    plink_input = MagicMock()
-    plink_input.bed = str(tmp_path / 'in.bed')
-    plink_input.bim = str(tmp_path / 'in.bim')
-    plink_input.fam = str(tmp_path / 'in.fam')
-    mock_batch.read_input_group.return_value = plink_input
 
-    mock_job = MagicMock()
+    recode_job = MagicMock()
+    king_job = MagicMock()
     for key, path in outputs.items():
-        setattr(mock_job.king_outputs, key, str(path))
+        setattr(king_job.king_outputs, key, str(path))
 
     with (
         patch('popgen_genotyping.jobs.king_ibdseg_job.get_batch', return_value=mock_batch),
-        patch('popgen_genotyping.jobs.king_ibdseg_job.register_job', return_value=mock_job),
-        patch('popgen_genotyping.jobs.king_ibdseg_job.config_retrieve', return_value='king-image:1.0'),
+        patch(
+            'popgen_genotyping.jobs.king_ibdseg_job.register_job',
+            side_effect=[recode_job, king_job],
+        ),
+        patch('popgen_genotyping.jobs.king_ibdseg_job.config_retrieve', return_value='img:1.0'),
     ):
         run_king_ibdseg(
             bed_path='gs://x/in.bed',
@@ -67,8 +67,9 @@ def _capture_run_king_ibdseg_command(tmp_path: Path) -> tuple[str, dict[str, Pat
             output_log_path='gs://o/out.log',
         )
 
-    cmd: str = mock_job.command.call_args[0][0]
-    return cmd, outputs
+    recode_cmd: str = recode_job.command.call_args[0][0]
+    king_cmd: str = king_job.command.call_args[0][0]
+    return recode_cmd, king_cmd, outputs
 
 
 def _strip_king_invocation(cmd: str, replacement: str = ':') -> str:
@@ -105,7 +106,7 @@ class TestKingIbdsegPlaceholderBackfill:
 
     def test_round_trips_when_king_omits_all_outputs(self, tmp_path: Path) -> None:
         """All four placeholders are produced with the documented schemas."""
-        cmd, outputs = _capture_run_king_ibdseg_command(tmp_path)
+        _recode_cmd, cmd, outputs = _capture_run_king_ibdseg_command(tmp_path)
 
         # Replace `king | tee` with a no-op so none of the KING outputs exist.
         script = _strip_king_invocation(cmd, replacement=':')
@@ -151,7 +152,7 @@ class TestKingIbdsegPlaceholderBackfill:
 
     def test_preserves_real_king_output(self, tmp_path: Path) -> None:
         """When KING writes real output the `[ -s ]` guards leave it untouched."""
-        cmd, outputs = _capture_run_king_ibdseg_command(tmp_path)
+        _recode_cmd, cmd, outputs = _capture_run_king_ibdseg_command(tmp_path)
 
         seg_path = outputs['seg']
         seg_x_path = outputs['seg_x']
@@ -172,6 +173,19 @@ class TestKingIbdsegPlaceholderBackfill:
             assert fh.read() == b'real-autosome-segments\n'
         with gzip.open(outputs['segments_gz_x'], 'rb') as fh:
             assert fh.read() == b'real-x-segments\n'
+
+    def test_recodes_chromosomes_to_numeric_before_king(self, tmp_path: Path) -> None:
+        """A plink2 recode to numeric chromosome codes precedes KING.
+
+        KING only parses numeric codes (23=X, 24=Y, 26=MT); the merged fileset is
+        chr-prefixed, so the first job must run ``plink2 --output-chr 26`` and
+        KING must consume that recoded fileset, not the raw input.
+        """
+        recode_cmd, king_cmd, _ = _capture_run_king_ibdseg_command(tmp_path)
+        assert 'plink2 --bfile' in recode_cmd
+        assert '--output-chr 26' in recode_cmd
+        # KING reads the recode job's resource group, never the chr-prefixed input.
+        assert 'king -b' in king_cmd
 
 
 # -- Tests: KingIbdseg.expected_outputs ---------------------------------------
@@ -257,10 +271,10 @@ class TestKingIbdsegQueueJobs:
             job_name='KingIbdseg_my_multicohort',
         )
 
-        # The same outputs dict flows through to make_outputs, and the job
-        # returned by run_king_ibdseg is the single job declared.
+        # The same outputs dict flows through to make_outputs, and the job list
+        # returned by run_king_ibdseg (recode + KING) is passed through verbatim.
         mock_self.make_outputs.assert_called_once_with(
             mock_multicohort,
             data=expected_outputs,
-            jobs=[mock_run.return_value],
+            jobs=mock_run.return_value,
         )
