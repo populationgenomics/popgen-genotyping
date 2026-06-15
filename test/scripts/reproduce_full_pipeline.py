@@ -1,4 +1,4 @@
-#!/usr/bin/env python3  # noqa: EXE001
+#!/usr/bin/env python3
 
 """
 Modular reproduction script for the refactored cohort-level genotyping pipeline.

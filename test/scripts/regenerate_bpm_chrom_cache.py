@@ -1,4 +1,4 @@
-#!/usr/bin/env python3  # noqa: EXE001
+#!/usr/bin/env python3
 
 """
 Regenerate the BPM locus-index to chromosome cache from a real Illumina BPM.
