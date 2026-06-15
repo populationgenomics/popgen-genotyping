@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import gzip
 import sys
+import warnings
 from pathlib import Path
 
 import pandas as pd
@@ -43,6 +44,41 @@ AUDIT_COLUMNS: list[str] = [
 ]
 
 
+ID_FORMAT_COLUMNS = ['CHROM', 'POS', 'REF', 'ALT']
+
+
+def expected_variant_ids(df: pd.DataFrame) -> pd.Series:
+    """Build canonical CHROM:POS:REF:ALT variant IDs."""
+    return (
+        df['CHROM'].astype(str)
+        + ':'
+        + df['POS'].astype(str)
+        + ':'
+        + df['REF'].astype(str)
+        + ':'
+        + df['ALT'].astype(str)
+    )
+
+
+def fix_variant_ids(df: pd.DataFrame, *, source: str) -> pd.DataFrame:
+    """Replace non-canonical IDs with CHROM:POS:REF:ALT IDs."""
+    missing = [col for col in ID_FORMAT_COLUMNS + ['ID'] if col not in df.columns]
+    if missing:
+        raise ValueError(f'{source} is missing columns required to check IDs: {missing}')
+
+    expected = expected_variant_ids(df)
+    bad_id = df['ID'].ne(expected)
+
+    if bad_id.any():
+        df = df.copy()
+        warnings.warn(
+            f'{source}: reformatted {bad_id.sum()} IDs that did not match '
+            'CHROM:POS:REF:ALT format.'
+        )
+        df.loc[bad_id, 'ID'] = expected[bad_id]
+
+    return df
+
 def load_egt_info(path: Path) -> pd.DataFrame:
     """Read a header-less EGT INFO TSV produced by ``bcftools query``.
 
@@ -61,6 +97,8 @@ def load_egt_info(path: Path) -> pd.DataFrame:
         na_values=['.', ''],
         dtype={'CHROM': str, 'ID': str, 'REF': str, 'ALT': str},
     )
+
+    df = fix_variant_ids(df, source=str(path))
     df['GenTrain_Score'] = pd.to_numeric(df['GenTrain_Score'], errors='coerce')
     df['Cluster_Sep'] = pd.to_numeric(df['Cluster_Sep'], errors='coerce')
     return df
@@ -78,7 +116,11 @@ def load_vmiss(path: Path) -> pd.DataFrame:
     """
     df: pd.DataFrame = pd.read_csv(path, sep='\t')
     df.columns = df.columns.str.lstrip('#')
+    df = fix_variant_ids(df, source=str(path))
     return df[['ID', 'F_MISS']].copy()
+
+def is_canonical_variant_id(id_: str) -> bool:
+    return len(id_.split(':')) == 4 and all(id_.split(':'))
 
 
 def load_hwe_pass_ids(path: Path) -> set[str]:
@@ -92,7 +134,14 @@ def load_hwe_pass_ids(path: Path) -> set[str]:
         Set of variant IDs that passed the HWE filter. Blank lines are skipped.
     """
     text: str = path.read_text()
-    return {line.strip() for line in text.splitlines() if line.strip()}
+    ids = {line.strip() for line in text.splitlines() if line.strip()}
+    bad_ids = {id_ for id_ in ids if not is_canonical_variant_id(id_)}
+    if bad_ids:
+        raise ValueError(
+            f'{path}: found {len(bad_ids)} IDs that are not in CHROM:POS:REF:ALT format.'
+        )
+
+    return ids
 
 
 def apply_filters(
