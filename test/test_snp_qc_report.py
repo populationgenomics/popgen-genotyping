@@ -59,7 +59,7 @@ def vmiss_tsv(tmp_path: Path) -> Path:
         'chr2\tchr2:200:G:A\t1\t100\t0.01',
         'chr2\tchr2:300:T:C\t1\t100\t0.01',
         'chr3\tchr3:100:CAG:C\t10\t100\t0.10',  # fail fmiss
-        'chr3\tchr3:200:A:G\t\t0\t100\t0',
+        'chr3\tchr3:200:A:G\t0\t100\t0',
     ]
     p = tmp_path / 'merged.vmiss'
     p.write_text('\n'.join(lines) + '\n')
