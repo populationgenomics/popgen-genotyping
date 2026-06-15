@@ -52,14 +52,14 @@ def vmiss_tsv(tmp_path: Path) -> Path:
     """Write a `plink2 --missing` per-variant TSV with the `#CHROM` header."""
     lines: list[str] = [
         '#CHROM\tID\tMISSING_CT\tOBS_CT\tF_MISS',
-        'chr1\trs1\t0\t100\t0',
-        'chr1\trs2\t1\t100\t0.01',
-        'chr1\trs3\t1\t100\t0.01',
-        'chr2\trs4\t1\t100\t0.01',
-        'chr2\trs5\t1\t100\t0.01',
-        'chr2\trs6\t1\t100\t0.01',
-        'chr3\trs7\t10\t100\t0.10',  # fail fmiss
-        'chr3\trs8\t0\t100\t0',
+        'chr1\tchr1:100:A:G\t0\t100\t0',
+        'chr1\tchr1:200:A:T\t1\t100\t0.01',
+        'chr1\tchr1:300:C:G\t1\t100\t0.01',
+        'chr2\tchr2:100:C:T\t1\t100\t0.01',
+        'chr2\tchr2:200:G:A\t1\t100\t0.01',
+        'chr2\tchr2:300:T:C\t1\t100\t0.01',
+        'chr3\tchr3:100:CAG:C\t10\t100\t0.10',  # fail fmiss
+        'chr3\tchr3:200:A:G\t\t0\t100\t0',
     ]
     p = tmp_path / 'merged.vmiss'
     p.write_text('\n'.join(lines) + '\n')
@@ -69,7 +69,7 @@ def vmiss_tsv(tmp_path: Path) -> Path:
 @pytest.fixture
 def hwe_pass_snplist(tmp_path: Path) -> Path:
     """Write a ``plink2 --write-snplist`` output omitting rs8 to mark it as HWE-fail."""
-    ids: list[str] = ['rs1', 'rs2', 'rs3', 'rs4', 'rs5', 'rs6', 'rs7']
+    ids: list[str] = ['chr1:100:A:G', 'chr1:200:A:T', 'chr1:300:C:G', 'chr2:100:C:T', 'chr2:200:G:A', 'chr2:300:T:C', 'chr3:100:CAG:C']
     p = tmp_path / 'hwe_pass.snplist'
     p.write_text('\n'.join(ids) + '\n')
     return p
@@ -78,20 +78,20 @@ def hwe_pass_snplist(tmp_path: Path) -> Path:
 def test_load_egt_info_parses_dot_as_nan(egt_tsv: Path) -> None:
     df = load_egt_info(egt_tsv)
     assert df.shape == (8, 7)
-    assert df.loc[df['ID'] == 'rs6', 'GenTrain_Score'].isna().all()
-    assert df.loc[df['ID'] == 'rs6', 'Cluster_Sep'].isna().all()
+    assert df.loc[df['ID'] == 'chr2:300:T:C', 'GenTrain_Score'].isna().all()
+    assert df.loc[df['ID'] == 'chr2:300:T:C', 'Cluster_Sep'].isna().all()
 
 
 def test_load_vmiss_strips_header_hash(vmiss_tsv: Path) -> None:
     df = load_vmiss(vmiss_tsv)
     assert list(df.columns) == ['ID', 'F_MISS']
-    assert df.loc[df['ID'] == 'rs7', 'F_MISS'].iloc[0] == pytest.approx(0.10)
+    assert df.loc[df['ID'] == 'chr3:100:CAG:C', 'F_MISS'].iloc[0] == pytest.approx(0.10)
 
 
 def test_load_hwe_pass_ids_skips_blanks(tmp_path: Path) -> None:
     p = tmp_path / 'hwe.snplist'
-    p.write_text('rs1\n\nrs2\n   \nrs3\n')
-    assert load_hwe_pass_ids(p) == {'rs1', 'rs2', 'rs3'}
+    p.write_text('chr1:100:A:G\n\nchr1:200:A:T\n   \nchr1:300:C:G\n')
+    assert load_hwe_pass_ids(p) == {'chr1:100:A:G', 'chr1:200:A:T', 'chr1:300:C:G'}
 
 
 def test_apply_filters_marks_each_failure_class(
@@ -104,16 +104,16 @@ def test_apply_filters_marks_each_failure_class(
     df = df_egt.merge(df_vmiss, on='ID', how='left')
     out = apply_filters(df, hwe_pass_ids=load_hwe_pass_ids(hwe_pass_snplist), **CONSERVATIVE_THRESHOLDS)
     by_id: dict[str, dict[str, bool]] = out.set_index('ID').to_dict(orient='index')  # type: ignore[assignment]
-    assert by_id['rs1']['fail'] is False
-    assert by_id['rs2']['fail'] is False  # strand-ambiguity is not a per-SNP QC filter
-    assert by_id['rs3']['fail'] is False  # strand-ambiguity is not a per-SNP QC filter
-    assert by_id['rs4']['fail'] is True  # gentrain
-    assert by_id['rs5']['fail'] is True  # cluster_sep
-    assert by_id['rs6']['fail'] is True  # NaN scores
-    assert by_id['rs7']['fail'] is True  # fmiss
-    assert by_id['rs8']['fail'] is True  # absent from hwe pass list
-    assert by_id['rs8']['fail_hwe'] is True
-    assert by_id['rs1']['fail_hwe'] is False
+    assert by_id['chr1:100:A:G']['fail'] is False
+    assert by_id['chr1:200:A:T']['fail'] is False  # strand-ambiguity is not a per-SNP QC filter
+    assert by_id['chr1:300:C:G']['fail'] is False  # strand-ambiguity is not a per-SNP QC filter
+    assert by_id['chr2:100:C:T']['fail'] is True  # gentrain
+    assert by_id['chr2:200:G:A']['fail'] is True  # cluster_sep
+    assert by_id['chr2:300:T:C']['fail'] is True  # NaN scores
+    assert by_id['chr3:100:CAG:C']['fail'] is True  # fmiss
+    assert by_id['chr3:200:A:G']['fail'] is True  # absent from hwe pass list
+    assert by_id['chr3:200:A:G']['fail_hwe'] is True
+    assert by_id['chr1:100:A:G']['fail_hwe'] is False
 
 
 def test_apply_filters_nan_fmiss_fails() -> None:
@@ -144,17 +144,17 @@ def test_summarise_counts_match_filter_columns(
     out = apply_filters(df, hwe_pass_ids=load_hwe_pass_ids(hwe_pass_snplist), **CONSERVATIVE_THRESHOLDS)
     s = summarise(out).set_index('metric')['value'].to_dict()
     assert s['total_variants'] == 8
-    assert s['fail_gentrain'] == 2  # rs4 + rs6 (NaN)
-    assert s['fail_cluster_sep'] == 2  # rs5 + rs6 (NaN)
-    assert s['fail_fmiss'] == 1  # rs7
-    assert s['fail_hwe'] == 1  # rs8
+    assert s['fail_gentrain'] == 2  # chr2:100:C:T + chr2:300:T:C (NaN)
+    assert s['fail_cluster_sep'] == 2  # chr2:200:G:A + chr2:300:T:C (NaN)
+    assert s['fail_fmiss'] == 1  # chr3:100:CAG:C
+    assert s['fail_hwe'] == 1  # chr3:200:A:G
     assert s['total_excluded'] + s['total_retained'] == s['total_variants']
-    # Priority cascade gentrain → cluster_sep → fmiss → hwe: rs6 fails gentrain
+    # Priority cascade gentrain → cluster_sep → fmiss → hwe: chr2:300:T:C fails gentrain
     # and cluster_sep but is attributed only to gentrain.
-    assert s['first_fail_gentrain'] == 2  # rs4, rs6
-    assert s['first_fail_cluster_sep'] == 1  # rs5 (rs6 absorbed by gentrain)
-    assert s['first_fail_fmiss'] == 1  # rs7
-    assert s['first_fail_hwe'] == 1  # rs8
+    assert s['first_fail_gentrain'] == 2  # chr2:100:C:T, chr2:300:T:C
+    assert s['first_fail_cluster_sep'] == 1  # chr2:200:G:A (chr2:300:T:C absorbed by gentrain)
+    assert s['first_fail_fmiss'] == 1  # chr3:100:CAG:C
+    assert s['first_fail_hwe'] == 1  # chr3:200:A:G
     cascade_keys = ('first_fail_gentrain', 'first_fail_cluster_sep', 'first_fail_fmiss', 'first_fail_hwe')
     assert sum(s[k] for k in cascade_keys) == s['total_excluded']
 
@@ -193,10 +193,10 @@ def test_main_end_to_end(
     assert rc == 0
     with gzip.open(audit, 'rt') as f:
         audit_df = pd.read_csv(f, sep='\t')
-    assert set(audit_df['ID']) == {'rs1', 'rs2', 'rs3', 'rs4', 'rs5', 'rs6', 'rs7', 'rs8'}
+    assert set(audit_df['ID']) == {'chr1:100:A:G', 'chr1:200:A:T', 'chr1:300:C:G', 'chr2:100:C:T', 'chr2:200:G:A', 'chr2:300:T:C', 'chr3:100:CAG:C', 'chr3:200:A:G'}
     excluded: list[str] = excl.read_text().strip().splitlines()
-    assert set(excluded) == {'rs4', 'rs5', 'rs6', 'rs7', 'rs8'}
-    assert not audit_df.loc[audit_df['ID'] == 'rs1', 'fail'].iloc[0]
+    assert set(excluded) == {'chr2:100:C:T', 'chr2:200:G:A', 'chr2:300:T:C', 'chr3:100:CAG:C', 'chr3:200:A:G'}
+    assert not audit_df.loc[audit_df['ID'] == 'chr1:100:A:G', 'fail'].iloc[0]
 
 
 def test_write_outputs_empty_exclusion(tmp_path: Path) -> None:
@@ -206,7 +206,7 @@ def test_write_outputs_empty_exclusion(tmp_path: Path) -> None:
             'POS': [100],
             'REF': ['A'],
             'ALT': ['G'],
-            'ID': ['rs1'],
+            'ID': ['chr1:100:A:G'],
             'GenTrain_Score': [0.99],
             'Cluster_Sep': [0.9],
             'F_MISS': [0.0],
