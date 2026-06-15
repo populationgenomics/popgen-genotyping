@@ -69,8 +69,15 @@ def vmiss_tsv(tmp_path: Path) -> Path:
 @pytest.fixture
 def hwe_pass_snplist(tmp_path: Path) -> Path:
     """Write a ``plink2 --write-snplist`` output omitting rs8 to mark it as HWE-fail."""
-    ids: list[str] = ['chr1:100:A:G', 'chr1:200:A:T', 'chr1:300:C:G', 'chr2:100:C:T', 'chr2:200:G:A', 'chr2:300:T:C',
-                      'chr3:100:CAG:C']
+    ids: list[str] = [
+        'chr1:100:A:G',
+        'chr1:200:A:T',
+        'chr1:300:C:G',
+        'chr2:100:C:T',
+        'chr2:200:G:A',
+        'chr2:300:T:C',
+        'chr3:100:CAG:C',
+    ]
     p = tmp_path / 'hwe_pass.snplist'
     p.write_text('\n'.join(ids) + '\n')
     return p
@@ -194,8 +201,16 @@ def test_main_end_to_end(
     assert rc == 0
     with gzip.open(audit, 'rt') as f:
         audit_df = pd.read_csv(f, sep='\t')
-    assert set(audit_df['ID']) == {'chr1:100:A:G', 'chr1:200:A:T', 'chr1:300:C:G', 'chr2:100:C:T', 'chr2:200:G:A',
-                                   'chr2:300:T:C', 'chr3:100:CAG:C', 'chr3:200:A:G'}
+    assert set(audit_df['ID']) == {
+        'chr1:100:A:G',
+        'chr1:200:A:T',
+        'chr1:300:C:G',
+        'chr2:100:C:T',
+        'chr2:200:G:A',
+        'chr2:300:T:C',
+        'chr3:100:CAG:C',
+        'chr3:200:A:G',
+    }
     excluded: list[str] = excl.read_text().strip().splitlines()
     assert set(excluded) == {'chr2:100:C:T', 'chr2:200:G:A', 'chr2:300:T:C', 'chr3:100:CAG:C', 'chr3:200:A:G'}
     assert not audit_df.loc[audit_df['ID'] == 'chr1:100:A:G', 'fail'].iloc[0]
