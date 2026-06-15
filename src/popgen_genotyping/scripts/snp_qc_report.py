@@ -47,6 +47,7 @@ AUDIT_COLUMNS: list[str] = [
     'fail',
 ]
 
+
 def load_egt_info(path: Path) -> pd.DataFrame:
     """Read a header-less EGT INFO TSV produced by ``bcftools query``.
 
@@ -78,9 +79,7 @@ def load_egt_info(path: Path) -> pd.DataFrame:
     bad_id = df['ID'].ne(expected_id)
 
     if bad_id.any():
-        logging.info(
-            f'Reformatted {bad_id.sum()} EGT IDs that did not match '
-            'CHROM:POS:REF:ALT format.')
+        logging.info(f'Reformatted {bad_id.sum()} EGT IDs that did not match CHROM:POS:REF:ALT format.')
         df.loc[bad_id, 'ID'] = expected_id[bad_id]
     df['GenTrain_Score'] = pd.to_numeric(df['GenTrain_Score'], errors='coerce')
     df['Cluster_Sep'] = pd.to_numeric(df['Cluster_Sep'], errors='coerce')
@@ -100,6 +99,7 @@ def load_vmiss(path: Path) -> pd.DataFrame:
     df: pd.DataFrame = pd.read_csv(path, sep='\t')
     df.columns = df.columns.str.lstrip('#')
     return df[['ID', 'F_MISS']].copy()
+
 
 def load_hwe_pass_ids(path: Path) -> set[str]:
     """Read a ``plink2 --write-snplist`` output as a set of passing variant IDs.
