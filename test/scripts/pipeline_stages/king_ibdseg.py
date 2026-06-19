@@ -7,6 +7,7 @@ from pathlib import Path
 from scripts.testing_utils import (
     DATA_DIR,
     KING_IMAGE,
+    PLINK_IMAGE,
     run_docker,
     to_container,
 )
@@ -33,11 +34,20 @@ def run_king_ibdseg(plink1_prefix_host: Path, prefix: str = 'king') -> dict[str,
     king_dir: Path = DATA_DIR / 'king'
     king_dir.mkdir(parents=True, exist_ok=True)
 
-    bed_int: str = to_container(plink1_prefix_host.with_suffix('.bed'))
     king_prefix_host: Path = king_dir / prefix
     king_prefix_int: str = to_container(king_prefix_host)
     log_int: str = to_container(king_dir / f'{prefix}.log')
 
+    # KING only parses numeric chromosome codes (23=X, 24=Y, 26=MT); the merged
+    # fileset is chr-prefixed, so recode to numeric codes with plink2 first.
+    recode_prefix_host: Path = king_dir / f'{prefix}_recode'
+    recode_cmd: str = (
+        f"bash -c 'plink2 --bfile {to_container(plink1_prefix_host)} --allow-extra-chr "
+        f"--output-chr 26 --make-bed --out {to_container(recode_prefix_host)}'"
+    )
+    run_docker(PLINK_IMAGE, recode_cmd)
+
+    bed_int: str = to_container(recode_prefix_host.with_suffix('.bed'))
     cmd: str = (
         f"bash -c 'king -b {bed_int} --ibdseg --degree 3 --cpus $(nproc) "
         f"--prefix {king_prefix_int} 2>&1 | tee {log_int}'"

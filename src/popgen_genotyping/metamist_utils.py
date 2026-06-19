@@ -78,6 +78,10 @@ def query_genotyping_manifests(project: str | None = None) -> list[dict[str, Any
     if project is None:
         project = config_retrieve(['workflow', 'dataset'])
 
+    # At test access level the namespaced Metamist project carries a -test suffix.
+    if config_retrieve(['workflow', 'access_level']) == 'test' and 'test' not in project:
+        project += '-test'
+
     # Execute the query
     query_result: dict[str, Any] = query(QUERY_GENOTYPING_MANIFESTS, {'project': project})
 
@@ -274,6 +278,10 @@ def query_reported_sex(project: str | None = None) -> dict[str, str]:
     """
     if project is None:
         project = config_retrieve(['workflow', 'dataset'])
+
+    # At test access level the namespaced Metamist project carries a -test suffix.
+    if config_retrieve(['workflow', 'access_level']) == 'test' and 'test' not in project:
+        project += '-test'
 
     # Execute the query
     query_result: dict[str, Any] = query(QUERY_REPORTED_SEX, {'project': project})
