@@ -4,7 +4,8 @@ Joins the Illumina EGT INFO TSV (extracted from the references-repo
 sample-less BCF) with the merged-set ``plink2 --missing`` per-variant output
 and a ``plink2 --hwe`` pass snplist, applies the per-filter thresholds
 (``GenTrain_Score``, ``Cluster_Sep``, ``F_MISS``, Hardy-Weinberg), and emits
-an exclusion ``.snplist`` plus an audit TSV and per-filter summary.
+an inclusion ``.snplist`` of passing variants (for ``plink2 --extract``) plus
+an audit TSV and per-filter summary.
 """
 
 from __future__ import annotations
@@ -40,11 +41,11 @@ AUDIT_COLUMNS: list[str] = [
     'GenTrain_Score',
     'Cluster_Sep',
     'F_MISS',
-    'fail_gentrain',
-    'fail_cluster_sep',
-    'fail_fmiss',
-    'fail_hwe',
-    'fail',
+    'pass_gentrain',
+    'pass_cluster_sep',
+    'pass_fmiss',
+    'pass_hwe',
+    'pass',
 ]
 
 
@@ -93,12 +94,12 @@ def load_vmiss(path: Path) -> pd.DataFrame:
         path: Path to a ``.vmiss`` file (header line starts with ``#CHROM``).
 
     Returns:
-        DataFrame with the ``#`` stripped from the header and a single
-        ``ID``/``F_MISS`` projection.
+        DataFrame with just the ``ID`` and ``F_MISS`` columns. ``ID`` carries no
+        ``#`` prefix in a ``.vmiss`` header (only ``#CHROM`` does), so the two
+        columns are read directly.
     """
-    df: pd.DataFrame = pd.read_csv(path, sep='\t')
-    df.columns = df.columns.str.lstrip('#')
-    return df[['ID', 'F_MISS']].copy()
+    df: pd.DataFrame = pd.read_csv(path, sep='\t', usecols=['ID', 'F_MISS'])
+    return df
 
 
 def load_hwe_pass_ids(path: Path) -> set[str]:
@@ -123,11 +124,13 @@ def apply_filters(
     fmiss_max: float,
     hwe_pass_ids: set[str],
 ) -> pd.DataFrame:
-    """Append per-filter and aggregate fail columns to ``df``.
+    """Append per-filter and aggregate pass columns to ``df``.
 
-    NaN inputs (missing EGT scores or missing F_MISS) are treated as failures
-    so the variant lands on the exclusion list rather than silently passing.
-    HWE failure is determined by absence from the ``plink2 --hwe`` pass list.
+    A variant passes a filter when it meets the threshold; the aggregate
+    ``pass`` column is the conjunction of all four. NaN inputs (missing EGT
+    scores or missing F_MISS) make the threshold comparison ``False``, so a
+    variant with missing data does not pass and is kept off the inclusion list.
+    HWE pass is membership of the ``plink2 --hwe`` pass list.
 
     Args:
         df: Joined EGT + vmiss frame.
@@ -137,17 +140,17 @@ def apply_filters(
         hwe_pass_ids: Variant IDs that passed ``plink2 --hwe``.
 
     Returns:
-        Copy of ``df`` with five boolean columns: ``fail_gentrain``,
-        ``fail_cluster_sep``, ``fail_fmiss``, ``fail_hwe``, ``fail``.
-        ``True`` indicates the variant failed that filter (or any filter, for
-        the aggregate ``fail`` column).
+        Copy of ``df`` with five boolean columns: ``pass_gentrain``,
+        ``pass_cluster_sep``, ``pass_fmiss``, ``pass_hwe``, ``pass``.
+        ``True`` indicates the variant passed that filter (or every filter, for
+        the aggregate ``pass`` column).
     """
     out: pd.DataFrame = df.copy()
-    out['fail_gentrain'] = out['GenTrain_Score'].fillna(-1.0) < gentrain_min
-    out['fail_cluster_sep'] = out['Cluster_Sep'].fillna(-1.0) < cluster_sep_min
-    out['fail_fmiss'] = out['F_MISS'].fillna(1.0) > fmiss_max
-    out['fail_hwe'] = ~out['ID'].astype(str).isin(hwe_pass_ids)
-    out['fail'] = out['fail_gentrain'] | out['fail_cluster_sep'] | out['fail_fmiss'] | out['fail_hwe']
+    out['pass_gentrain'] = out['GenTrain_Score'] >= gentrain_min
+    out['pass_cluster_sep'] = out['Cluster_Sep'] >= cluster_sep_min
+    out['pass_fmiss'] = out['F_MISS'] <= fmiss_max
+    out['pass_hwe'] = out['ID'].astype(str).isin(hwe_pass_ids)
+    out['pass'] = out['pass_gentrain'] & out['pass_cluster_sep'] & out['pass_fmiss'] & out['pass_hwe']
     return out
 
 
@@ -171,22 +174,26 @@ def summarise(df: pd.DataFrame) -> pd.DataFrame:
     Returns:
         Two-column DataFrame (``metric``, ``value``) suitable for direct TSV write.
     """
-    first_fail_gentrain: pd.Series = df['fail_gentrain']
-    first_fail_cluster_sep: pd.Series = ~df['fail_gentrain'] & df['fail_cluster_sep']
-    first_fail_fmiss: pd.Series = ~df['fail_gentrain'] & ~df['fail_cluster_sep'] & df['fail_fmiss']
-    first_fail_hwe: pd.Series = ~df['fail_gentrain'] & ~df['fail_cluster_sep'] & ~df['fail_fmiss'] & df['fail_hwe']
+    fail_gentrain: pd.Series = ~df['pass_gentrain']
+    fail_cluster_sep: pd.Series = ~df['pass_cluster_sep']
+    fail_fmiss: pd.Series = ~df['pass_fmiss']
+    fail_hwe: pd.Series = ~df['pass_hwe']
+    first_fail_gentrain: pd.Series = fail_gentrain
+    first_fail_cluster_sep: pd.Series = df['pass_gentrain'] & fail_cluster_sep
+    first_fail_fmiss: pd.Series = df['pass_gentrain'] & df['pass_cluster_sep'] & fail_fmiss
+    first_fail_hwe: pd.Series = df['pass_gentrain'] & df['pass_cluster_sep'] & df['pass_fmiss'] & fail_hwe
     rows: list[tuple[str, int]] = [
         ('total_variants', len(df)),
         ('first_fail_gentrain', int(first_fail_gentrain.sum())),
         ('first_fail_cluster_sep', int(first_fail_cluster_sep.sum())),
         ('first_fail_fmiss', int(first_fail_fmiss.sum())),
         ('first_fail_hwe', int(first_fail_hwe.sum())),
-        ('fail_gentrain', int(df['fail_gentrain'].sum())),
-        ('fail_cluster_sep', int(df['fail_cluster_sep'].sum())),
-        ('fail_fmiss', int(df['fail_fmiss'].sum())),
-        ('fail_hwe', int(df['fail_hwe'].sum())),
-        ('total_excluded', int(df['fail'].sum())),
-        ('total_retained', int((~df['fail']).sum())),
+        ('fail_gentrain', int(fail_gentrain.sum())),
+        ('fail_cluster_sep', int(fail_cluster_sep.sum())),
+        ('fail_fmiss', int(fail_fmiss.sum())),
+        ('fail_hwe', int(fail_hwe.sum())),
+        ('total_excluded', int((~df['pass']).sum())),
+        ('total_retained', int(df['pass'].sum())),
     ]
     return pd.DataFrame(rows, columns=['metric', 'value'])
 
@@ -195,22 +202,23 @@ def write_outputs(
     df: pd.DataFrame,
     *,
     audit_path: Path,
-    exclusion_path: Path,
+    inclusion_path: Path,
     summary_path: Path,
 ) -> None:
-    """Write the audit TSV (gzip), exclusion ``.snplist``, and summary TSV.
+    """Write the audit TSV (gzip), inclusion ``.snplist``, and summary TSV.
 
     Args:
         df: Annotated frame from :func:`apply_filters`.
         audit_path: Destination for the bgzippable per-variant audit TSV (``.gz``).
-        exclusion_path: Destination for the newline-delimited failed-ID list.
+        inclusion_path: Destination for the newline-delimited passing-ID list
+            (the variants to keep, for ``plink2 --extract``).
         summary_path: Destination for the per-filter summary TSV.
     """
     with gzip.open(audit_path, 'wt') as audit_handle:
         df[AUDIT_COLUMNS].to_csv(audit_handle, sep='\t', index=False)
 
-    excluded_ids: pd.Series = df.loc[df['fail'], 'ID']
-    exclusion_path.write_text('\n'.join(excluded_ids.astype(str)) + ('\n' if len(excluded_ids) else ''))
+    included_ids: pd.Series = df.loc[df['pass'], 'ID']
+    inclusion_path.write_text('\n'.join(included_ids.astype(str)) + ('\n' if len(included_ids) else ''))
 
     summarise(df).to_csv(summary_path, sep='\t', index=False)
 
@@ -232,7 +240,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument('--cluster-sep-min', type=float, required=True)
     p.add_argument('--fmiss-max', type=float, required=True)
     p.add_argument('--output-audit-tsv', type=Path, required=True)
-    p.add_argument('--output-exclusion-list', type=Path, required=True)
+    p.add_argument('--output-inclusion-list', type=Path, required=True)
     p.add_argument('--output-summary-tsv', type=Path, required=True)
     return p.parse_args(argv)
 
@@ -261,7 +269,7 @@ def main(argv: list[str] | None = None) -> int:
     write_outputs(
         df,
         audit_path=args.output_audit_tsv,
-        exclusion_path=args.output_exclusion_list,
+        inclusion_path=args.output_inclusion_list,
         summary_path=args.output_summary_tsv,
     )
     return 0

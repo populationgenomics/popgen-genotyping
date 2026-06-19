@@ -112,16 +112,16 @@ def test_apply_filters_marks_each_failure_class(
     df = df_egt.merge(df_vmiss, on='ID', how='left')
     out = apply_filters(df, hwe_pass_ids=load_hwe_pass_ids(hwe_pass_snplist), **CONSERVATIVE_THRESHOLDS)
     by_id: dict[str, dict[str, bool]] = out.set_index('ID').to_dict(orient='index')  # type: ignore[assignment]
-    assert by_id['chr1:100:A:G']['fail'] is False
-    assert by_id['chr1:200:A:T']['fail'] is False  # strand-ambiguity is not a per-SNP QC filter
-    assert by_id['chr1:300:C:G']['fail'] is False  # strand-ambiguity is not a per-SNP QC filter
-    assert by_id['chr2:100:C:T']['fail'] is True  # gentrain
-    assert by_id['chr2:200:G:A']['fail'] is True  # cluster_sep
-    assert by_id['chr2:300:T:C']['fail'] is True  # NaN scores
-    assert by_id['chr3:100:CAG:C']['fail'] is True  # fmiss
-    assert by_id['chr3:200:A:G']['fail'] is True  # absent from hwe pass list
-    assert by_id['chr3:200:A:G']['fail_hwe'] is True
-    assert by_id['chr1:100:A:G']['fail_hwe'] is False
+    assert by_id['chr1:100:A:G']['pass'] is True
+    assert by_id['chr1:200:A:T']['pass'] is True  # strand-ambiguity is not a per-SNP QC filter
+    assert by_id['chr1:300:C:G']['pass'] is True  # strand-ambiguity is not a per-SNP QC filter
+    assert by_id['chr2:100:C:T']['pass'] is False  # gentrain
+    assert by_id['chr2:200:G:A']['pass'] is False  # cluster_sep
+    assert by_id['chr2:300:T:C']['pass'] is False  # NaN scores
+    assert by_id['chr3:100:CAG:C']['pass'] is False  # fmiss
+    assert by_id['chr3:200:A:G']['pass'] is False  # absent from hwe pass list
+    assert by_id['chr3:200:A:G']['pass_hwe'] is False
+    assert by_id['chr1:100:A:G']['pass_hwe'] is True
 
 
 def test_apply_filters_nan_fmiss_fails() -> None:
@@ -136,9 +136,9 @@ def test_apply_filters_nan_fmiss_fails() -> None:
         },
     )
     out = apply_filters(df, hwe_pass_ids={'x'}, **CONSERVATIVE_THRESHOLDS)
-    assert bool(out['fail_fmiss'].iloc[0])
-    assert bool(out['fail'].iloc[0])
-    assert not bool(out['fail_hwe'].iloc[0])
+    assert not bool(out['pass_fmiss'].iloc[0])
+    assert not bool(out['pass'].iloc[0])
+    assert bool(out['pass_hwe'].iloc[0])
 
 
 def test_summarise_counts_match_filter_columns(
@@ -174,7 +174,7 @@ def test_main_end_to_end(
     hwe_pass_snplist: Path,
 ) -> None:
     audit = tmp_path / 'snp_qc.audit.tsv.gz'
-    excl = tmp_path / 'snp_qc.exclude.snplist'
+    incl = tmp_path / 'snp_qc.include.snplist'
     summary = tmp_path / 'snp_qc.summary.tsv'
     rc = main(
         [
@@ -192,8 +192,8 @@ def test_main_end_to_end(
             '0.02',
             '--output-audit-tsv',
             str(audit),
-            '--output-exclusion-list',
-            str(excl),
+            '--output-inclusion-list',
+            str(incl),
             '--output-summary-tsv',
             str(summary),
         ],
@@ -211,12 +211,12 @@ def test_main_end_to_end(
         'chr3:100:CAG:C',
         'chr3:200:A:G',
     }
-    excluded: list[str] = excl.read_text().strip().splitlines()
-    assert set(excluded) == {'chr2:100:C:T', 'chr2:200:G:A', 'chr2:300:T:C', 'chr3:100:CAG:C', 'chr3:200:A:G'}
-    assert not audit_df.loc[audit_df['ID'] == 'chr1:100:A:G', 'fail'].iloc[0]
+    included: list[str] = incl.read_text().strip().splitlines()
+    assert set(included) == {'chr1:100:A:G', 'chr1:200:A:T', 'chr1:300:C:G'}
+    assert audit_df.loc[audit_df['ID'] == 'chr1:100:A:G', 'pass'].iloc[0]
 
 
-def test_write_outputs_empty_exclusion(tmp_path: Path) -> None:
+def test_write_outputs_empty_inclusion(tmp_path: Path) -> None:
     df = pd.DataFrame(
         {
             'CHROM': ['chr1'],
@@ -224,18 +224,18 @@ def test_write_outputs_empty_exclusion(tmp_path: Path) -> None:
             'REF': ['A'],
             'ALT': ['G'],
             'ID': ['chr1:100:A:G'],
-            'GenTrain_Score': [0.99],
+            'GenTrain_Score': [0.1],
             'Cluster_Sep': [0.9],
             'F_MISS': [0.0],
-            'fail_gentrain': [False],
-            'fail_cluster_sep': [False],
-            'fail_fmiss': [False],
-            'fail_hwe': [False],
-            'fail': [False],
+            'pass_gentrain': [False],
+            'pass_cluster_sep': [True],
+            'pass_fmiss': [True],
+            'pass_hwe': [True],
+            'pass': [False],
         },
     )
     audit = tmp_path / 'a.tsv.gz'
-    excl = tmp_path / 'e.snplist'
+    incl = tmp_path / 'i.snplist'
     summary = tmp_path / 's.tsv'
-    write_outputs(df, audit_path=audit, exclusion_path=excl, summary_path=summary)
-    assert excl.read_text() == ''
+    write_outputs(df, audit_path=audit, inclusion_path=incl, summary_path=summary)
+    assert incl.read_text() == ''

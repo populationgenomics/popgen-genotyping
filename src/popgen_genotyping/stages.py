@@ -399,7 +399,7 @@ class KingIbdseg(MultiCohortStage):
 @stage(
     required_stages=[ExportCohortDatasets],
     analysis_type='array_snp_qc',
-    analysis_keys=['exclusion_list'],
+    analysis_keys=['inclusion_list'],
 )
 class SnpQcReport(MultiCohortStage):
     """
@@ -410,19 +410,20 @@ class SnpQcReport(MultiCohortStage):
     the references-repo EGT INFO BCF (``GenTrain_Score`` / ``Cluster_Sep``),
     and applies the thresholds declared under
     ``[popgen_genotyping.snp_qc_report.thresholds]``. Emits an audit TSV, an
-    exclusion ``.snplist`` (failed variant IDs), and a per-filter summary TSV.
-    The PGEN released by ``ExportCohortDatasets`` is not modified.
+    inclusion ``.snplist`` (passing variant IDs, for ``plink2 --extract``), and
+    a per-filter summary TSV. The PGEN released by ``ExportCohortDatasets`` is
+    not modified.
     """
 
     def expected_outputs(self, multicohort: MultiCohort) -> dict[str, Path]:
         """
-        Define the audit TSV, exclusion list, and summary TSV outputs.
+        Define the audit TSV, inclusion list, and summary TSV outputs.
         """
         prefix: Path = get_output_prefix(dataset=multicohort.analysis_dataset, stage_name=self.name)
         datestamp: str = datetime.now(tz=timezone.utc).strftime('%Y%m%d')
         return {
             'audit_tsv': prefix / f'{datestamp}_snp_qc.audit.tsv.gz',
-            'exclusion_list': prefix / f'{datestamp}_snp_qc.exclude.snplist',
+            'inclusion_list': prefix / f'{datestamp}_snp_qc.include.snplist',
             'summary_tsv': prefix / f'{datestamp}_snp_qc.summary.tsv',
         }
 
@@ -468,7 +469,7 @@ class SnpQcReport(MultiCohortStage):
             hwe_midp=hwe_midp,
             hwe_keep_fewhet=hwe_keep_fewhet,
             output_audit_tsv_path=str(outputs['audit_tsv']),
-            output_exclusion_list_path=str(outputs['exclusion_list']),
+            output_inclusion_list_path=str(outputs['inclusion_list']),
             output_summary_tsv_path=str(outputs['summary_tsv']),
             job_name=f'SnpQcReport_{multicohort.name}',
         )

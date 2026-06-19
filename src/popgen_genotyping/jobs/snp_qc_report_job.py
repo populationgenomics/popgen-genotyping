@@ -1,4 +1,4 @@
-"""Hail Batch jobs to produces the per-SNP QC exclusion list.
+"""Hail Batch jobs that produce the per-SNP QC inclusion list.
 
 Three jobs:
 
@@ -46,7 +46,7 @@ def run_snp_qc_report(
     hwe_midp: bool,
     hwe_keep_fewhet: bool,
     output_audit_tsv_path: str,
-    output_exclusion_list_path: str,
+    output_inclusion_list_path: str,
     output_summary_tsv_path: str,
     job_name: str = 'snp_qc_report',
 ) -> list[BashJob]:
@@ -68,13 +68,14 @@ def run_snp_qc_report(
         hwe_keep_fewhet: If True, pass the ``keep-fewhet`` modifier so only
             excess-heterozygosity variants are filtered.
         output_audit_tsv_path: Output path for the bgzipped audit TSV.
-        output_exclusion_list_path: Output path for the exclusion ``.snplist``.
+        output_inclusion_list_path: Output path for the inclusion ``.snplist``
+            (passing variant IDs, for ``plink2 --extract``).
         output_summary_tsv_path: Output path for the summary TSV.
         job_name: Display name for the filter job (the extract jobs append
             ``_extract_egt_info`` / ``_hwe`` suffixes).
 
     Returns:
-        Queued jobs in dependency order: ``[extract_cluster_file_info, hwe_snplist, generate_snp_exclusion_list]``.
+        Queued jobs in dependency order: ``[extract_cluster_file_info, hwe_snplist, generate_snp_inclusion_list]``.
     """
     b: Batch = get_batch()
 
@@ -118,25 +119,25 @@ def run_snp_qc_report(
         psam=merged_psam_path,
     )
     hwe_snplist.declare_resource_group(
-        hwe_pass={
-            'snplist': '{root}.snplist',
-            'vmiss': '{root}.vmiss',
-        },
+        missing={'vmiss': '{root}.vmiss'},
+        hwe_pass={'snplist': '{root}.snplist'},
     )
 
     hwe_modifiers: str = ' '.join(m for m, on in (('midp', hwe_midp), ('keep-fewhet', hwe_keep_fewhet)) if on)
     hwe_args: str = f'{hwe_p} {hwe_k}' + (f' {hwe_modifiers}' if hwe_modifiers else '')
 
-    # Two plink2 invocations writing to the same prefix: --missing first so its
-    # .vmiss reflects the full merged variant set, then --hwe --write-snplist
-    # which restricts the post-filter snplist (but does not overwrite .vmiss).
+    # Two plink2 runs with distinct --out prefixes: --missing writes the F_MISS
+    # table (missing.vmiss) over the full merged variant set, and --hwe
+    # --write-snplist writes the variants surviving the HWE filter
+    # (hwe_pass.snplist). Separate prefixes keep the F_MISS table over the full
+    # variant set rather than the HWE-filtered subset.
     hwe_snplist.command(
         f"""
         set -euxo pipefail
         plink2 --pfile {merged_pgen} \\
             --output-chr chrM \\
             --missing \\
-            --out {hwe_snplist.hwe_pass}
+            --out {hwe_snplist.missing}
         plink2 --pfile {merged_pgen} \\
             --output-chr chrM \\
             --hwe {hwe_args} \\
@@ -145,7 +146,7 @@ def run_snp_qc_report(
         """,
     )
 
-    generate_snp_exclusion_list: BashJob = register_job(
+    generate_snp_inclusion_list: BashJob = register_job(
         batch=b,
         job_name=job_name,
         config_path=['popgen_genotyping', 'snp_qc_report'],
@@ -154,37 +155,37 @@ def run_snp_qc_report(
         default_memory='standard',
         default_storage='20G',
     )
-    generate_snp_exclusion_list.depends_on(extract_cluster_file_info, hwe_snplist)
+    generate_snp_inclusion_list.depends_on(extract_cluster_file_info, hwe_snplist)
 
     script_path: str = str(files('popgen_genotyping.scripts').joinpath('snp_qc_report.py'))
     script_resource = b.read_input(script_path)
 
-    generate_snp_exclusion_list.declare_resource_group(
+    generate_snp_inclusion_list.declare_resource_group(
         outputs={
             'audit_tsv_gz': '{root}.audit.tsv.gz',
-            'exclusion_list': '{root}.exclude.snplist',
+            'inclusion_list': '{root}.include.snplist',
             'summary_tsv': '{root}.summary.tsv',
         },
     )
 
-    generate_snp_exclusion_list.command(
+    generate_snp_inclusion_list.command(
         f"""
         set -euxo pipefail
         python3 {script_resource} \\
             --egt-info-tsv {extract_cluster_file_info.egt_info.tsv} \\
-            --merged-vmiss {hwe_snplist.hwe_pass.vmiss} \\
+            --merged-vmiss {hwe_snplist.missing.vmiss} \\
             --hwe-pass-snplist {hwe_snplist.hwe_pass.snplist} \\
             --gentrain-min {gentrain_min} \\
             --cluster-sep-min {cluster_sep_min} \\
             --fmiss-max {fmiss_max} \\
-            --output-audit-tsv {generate_snp_exclusion_list.outputs.audit_tsv_gz} \\
-            --output-exclusion-list {generate_snp_exclusion_list.outputs.exclusion_list} \\
-            --output-summary-tsv {generate_snp_exclusion_list.outputs.summary_tsv}
+            --output-audit-tsv {generate_snp_inclusion_list.outputs.audit_tsv_gz} \\
+            --output-inclusion-list {generate_snp_inclusion_list.outputs.inclusion_list} \\
+            --output-summary-tsv {generate_snp_inclusion_list.outputs.summary_tsv}
         """,
     )
 
-    b.write_output(generate_snp_exclusion_list.outputs.audit_tsv_gz, output_audit_tsv_path)
-    b.write_output(generate_snp_exclusion_list.outputs.exclusion_list, output_exclusion_list_path)
-    b.write_output(generate_snp_exclusion_list.outputs.summary_tsv, output_summary_tsv_path)
+    b.write_output(generate_snp_inclusion_list.outputs.audit_tsv_gz, output_audit_tsv_path)
+    b.write_output(generate_snp_inclusion_list.outputs.inclusion_list, output_inclusion_list_path)
+    b.write_output(generate_snp_inclusion_list.outputs.summary_tsv, output_summary_tsv_path)
 
-    return [extract_cluster_file_info, hwe_snplist, generate_snp_exclusion_list]
+    return [extract_cluster_file_info, hwe_snplist, generate_snp_inclusion_list]
