@@ -7,7 +7,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from cpg_flow.stage import CohortStage, MultiCohortStage, stage
+from cpg_flow.stage import CohortStage, stage
 from cpg_utils import to_path
 from cpg_utils.config import config_retrieve, reference_path
 
@@ -26,12 +26,11 @@ from popgen_genotyping.metamist_utils import (
     resolve_cohort_gtc_mapping,
     resolve_rolling_aggregate,
 )
-from popgen_genotyping.utils import get_output_prefix
 from popgen_genotyping.utils import get_output_prefix, reconstruct_cohort_output_paths
 
 if TYPE_CHECKING:
     from cpg_flow.stage import StageInput, StageOutput
-    from cpg_flow.targets import Cohort, MultiCohort
+    from cpg_flow.targets import Cohort
     from cpg_utils import Path
     from hailtop.batch.job import BashJob
     from hailtop.batch.resource import ResourceGroup
@@ -236,9 +235,7 @@ class MergeCohortPlink(CohortStage):
             )
 
             # Define an output prefix for the converted PLINK1.9 files in tmp storage
-            plink1_prefix = get_output_prefix(
-                dataset=multicohort.analysis_dataset, stage_name='Plink2ToPlink1', tmp=True
-            )
+            plink1_prefix = get_output_prefix(dataset=cohort.dataset, stage_name='Plink2ToPlink1', tmp=True)
 
             conversion_job, converted_plink1_resource = run_plink2_to_plink1(
                 pfile_prefix=previous_aggregate_plink2_paths,
@@ -262,23 +259,23 @@ class MergeCohortPlink(CohortStage):
         if merge_job_dependencies:
             j.depends_on(*merge_job_dependencies)
 
-        return self.make_outputs(multicohort, data=outputs, jobs=[j])
+        return self.make_outputs(cohort, data=outputs, jobs=[j])
 
 
 @stage(required_stages=[MergeCohortPlink], analysis_type='array_aggregate_pgen', analysis_keys=['pgen'])
-class ExportCohortDatasets(MultiCohortStage):
+class ExportCohortDatasets(CohortStage):
     """
     Export the merged cohort to PLINK2 format for long-term storage.
     BCF output goes to tmp for analysis, as it is too large for long term storage.
     """
 
-    def expected_outputs(self, multicohort: MultiCohort) -> dict[str, Path]:
+    def expected_outputs(self, cohort: Cohort) -> dict[str, Path]:
         """
         Define the expected PLINK2 outputs to long-term storage.
         BCF output goes to tmp for analysis, as it is too large for long term storage.
         """
-        prefix: Path = get_output_prefix(dataset=multicohort.analysis_dataset, stage_name=self.name)
-        tmp_bcf_prefix: Path = get_output_prefix(dataset=multicohort.analysis_dataset, stage_name=self.name, tmp=True)
+        prefix: Path = get_output_prefix(dataset=cohort.dataset, stage_name=self.name)
+        tmp_bcf_prefix: Path = get_output_prefix(dataset=cohort.dataset, stage_name=self.name, tmp=True)
         datestamp: str = datetime.now(tz=timezone.utc).strftime('%Y%m%d')
         return {
             'pgen': prefix / f'{datestamp}_cohort.pgen',
@@ -287,14 +284,14 @@ class ExportCohortDatasets(MultiCohortStage):
             'bcf': tmp_bcf_prefix / f'{datestamp}_cohort.bcf',
         }
 
-    def queue_jobs(self, multicohort: MultiCohort, inputs: StageInput) -> StageOutput:
+    def queue_jobs(self, cohort: Cohort, inputs: StageInput) -> StageOutput:
         """
         Queue the dataset export job using PLINK2.
         """
-        outputs: dict[str, Path] = self.expected_outputs(multicohort=multicohort)
+        outputs: dict[str, Path] = self.expected_outputs(cohort=cohort)
 
         # 1. Pull input from MergeCohortPlink
-        input_plink: dict[str, Path] = inputs.as_dict(target=multicohort, stage=MergeCohortPlink)
+        input_plink: dict[str, Path] = inputs.as_dict(target=cohort, stage=MergeCohortPlink)
 
         # 2. Call export job
         j: BashJob = run_export_cohort_datasets(
@@ -308,22 +305,22 @@ class ExportCohortDatasets(MultiCohortStage):
             job_name='ExportCohortDatasets',
         )
 
-        return self.make_outputs(multicohort, data=outputs, jobs=[j])
+        return self.make_outputs(cohort, data=outputs, jobs=[j])
 
 
 @stage(required_stages=[ExportCohortDatasets], analysis_type='array_qc_raw', analysis_keys=['log'])
-class Plink2Qc(MultiCohortStage):
+class Plink2Qc(CohortStage):
     """
     Per-sample PLINK2 QC on the merged pgen/pvar/psam: missingness, inbreeding,
     sex-check, plus per-variant allele frequencies. Per-variant missingness and
     Hardy-Weinberg are computed inside ``SnpQcReport``.
     """
 
-    def expected_outputs(self, multicohort: MultiCohort) -> dict[str, Path]:
+    def expected_outputs(self, cohort: Cohort) -> dict[str, Path]:
         """
-        Define the expected PLINK2 QC output files for the multi-cohort.
+        Define the expected PLINK2 QC output files for the cohort.
         """
-        prefix: Path = get_output_prefix(dataset=multicohort.analysis_dataset, stage_name=self.name)
+        prefix: Path = get_output_prefix(dataset=cohort.dataset, stage_name=self.name)
         datestamp: str = datetime.now(tz=timezone.utc).strftime('%Y%m%d')
         output_base_name = f'{datestamp}_qc'
         return {
@@ -334,14 +331,14 @@ class Plink2Qc(MultiCohortStage):
             'log': prefix / f'{output_base_name}.log',
         }
 
-    def queue_jobs(self, multicohort: MultiCohort, inputs: StageInput) -> StageOutput:
+    def queue_jobs(self, cohort: Cohort, inputs: StageInput) -> StageOutput:
         """
-        Queue the PLINK2 QC job for the multi-cohort.
+        Queue the PLINK2 QC job for the cohort.
         """
-        outputs: dict[str, Path] = self.expected_outputs(multicohort=multicohort)
+        outputs: dict[str, Path] = self.expected_outputs(cohort=cohort)
 
         # Get the input PGEN file path from the ExportCohortDatasets stage
-        input_plink_pgen: Path = inputs.as_path(target=multicohort, stage=ExportCohortDatasets, key='pgen')
+        input_plink_pgen: Path = inputs.as_path(target=cohort, stage=ExportCohortDatasets, key='pgen')
 
         # The outputs_path for the run_plink2_qc job is the base prefix for all QC files.
         output_plink2_prefix = str(outputs['smiss']).removesuffix('.smiss')
@@ -350,11 +347,11 @@ class Plink2Qc(MultiCohortStage):
         j: BashJob = run_plink2_qc(
             pgen_path=str(input_plink_pgen),
             outputs_path=output_plink2_prefix,
-            job_name=f'Plink2Qc_{multicohort.name}',
+            job_name=f'Plink2Qc_{cohort.name}',
         )
 
         # Return the expected outputs of this stage, referencing the outputs generated by the job
-        return self.make_outputs(multicohort, data=outputs, jobs=[j])
+        return self.make_outputs(cohort, data=outputs, jobs=[j])
 
 
 @stage(
@@ -362,21 +359,21 @@ class Plink2Qc(MultiCohortStage):
     analysis_type='array_relatedness_ibdseg',
     analysis_keys=['seg', 'seg_x'],
 )
-class KingIbdseg(MultiCohortStage):
+class KingIbdseg(CohortStage):
     """
     Infer pairwise IBD segments across the merged cohort with KING `--ibdseg`.
     """
 
-    def expected_outputs(self, multicohort: MultiCohort) -> dict[str, Path]:
+    def expected_outputs(self, cohort: Cohort) -> dict[str, Path]:
         """
-        Define the expected KING `--ibdseg` outputs for the multi-cohort.
+        Define the expected KING `--ibdseg` outputs for the cohort.
 
         KING 2.3.2 produces an X-chromosome companion (`{prefix}X.seg` /
         `{prefix}X.segments.gz`, no dot before the `X`) whenever the merged
         PLINK fileset has chrX SNPs. The job backfills header-only placeholders
         when the input has no chrX, so these outputs are always materialised.
         """
-        prefix: Path = get_output_prefix(dataset=multicohort.analysis_dataset, stage_name=self.name)
+        prefix: Path = get_output_prefix(dataset=cohort.dataset, stage_name=self.name)
         datestamp: str = datetime.now(tz=timezone.utc).strftime('%Y%m%d')
         output_base_name = f'{datestamp}_king'
         return {
@@ -387,13 +384,13 @@ class KingIbdseg(MultiCohortStage):
             'log': prefix / f'{output_base_name}.log',
         }
 
-    def queue_jobs(self, multicohort: MultiCohort, inputs: StageInput) -> StageOutput:
+    def queue_jobs(self, cohort: Cohort, inputs: StageInput) -> StageOutput:
         """
         Queue the KING `--ibdseg` job against the merged PLINK 1.9 dataset.
         """
-        outputs: dict[str, Path] = self.expected_outputs(multicohort=multicohort)
+        outputs: dict[str, Path] = self.expected_outputs(cohort=cohort)
 
-        merged_plink: dict[str, Path] = inputs.as_dict(target=multicohort, stage=MergeCohortPlink)
+        merged_plink: dict[str, Path] = inputs.as_dict(target=cohort, stage=MergeCohortPlink)
 
         jobs: list[BashJob] = run_king_ibdseg(
             bed_path=str(merged_plink['bed']),
@@ -404,10 +401,10 @@ class KingIbdseg(MultiCohortStage):
             output_seg_x_path=str(outputs['seg_x']),
             output_segments_x_path=str(outputs['segments_x']),
             output_log_path=str(outputs['log']),
-            job_name=f'KingIbdseg_{multicohort.name}',
+            job_name=f'KingIbdseg_{cohort.name}',
         )
 
-        return self.make_outputs(multicohort, data=outputs, jobs=jobs)
+        return self.make_outputs(cohort, data=outputs, jobs=jobs)
 
 
 @stage(
@@ -415,7 +412,7 @@ class KingIbdseg(MultiCohortStage):
     analysis_type='array_snp_qc',
     analysis_keys=['inclusion_list'],
 )
-class SnpQcReport(MultiCohortStage):
+class SnpQcReport(CohortStage):
     """
     Per-SNP QC: vendor cluster scores + call rate + Hardy-Weinberg.
 
@@ -429,11 +426,11 @@ class SnpQcReport(MultiCohortStage):
     not modified.
     """
 
-    def expected_outputs(self, multicohort: MultiCohort) -> dict[str, Path]:
+    def expected_outputs(self, cohort: Cohort) -> dict[str, Path]:
         """
         Define the audit TSV, inclusion list, and summary TSV outputs.
         """
-        prefix: Path = get_output_prefix(dataset=multicohort.analysis_dataset, stage_name=self.name)
+        prefix: Path = get_output_prefix(dataset=cohort.dataset, stage_name=self.name)
         datestamp: str = datetime.now(tz=timezone.utc).strftime('%Y%m%d')
         return {
             'audit_tsv': prefix / f'{datestamp}_snp_qc.audit.tsv.gz',
@@ -441,14 +438,14 @@ class SnpQcReport(MultiCohortStage):
             'summary_tsv': prefix / f'{datestamp}_snp_qc.summary.tsv',
         }
 
-    def queue_jobs(self, multicohort: MultiCohort, inputs: StageInput) -> StageOutput:
+    def queue_jobs(self, cohort: Cohort, inputs: StageInput) -> StageOutput:
         """
         Queue the EGT-INFO extract, merged-set variant-metrics, and filter jobs.
         """
-        outputs: dict[str, Path] = self.expected_outputs(multicohort=multicohort)
-        merged_pgen_path: Path = inputs.as_path(target=multicohort, stage=ExportCohortDatasets, key='pgen')
-        merged_pvar_path: Path = inputs.as_path(target=multicohort, stage=ExportCohortDatasets, key='pvar')
-        merged_psam_path: Path = inputs.as_path(target=multicohort, stage=ExportCohortDatasets, key='psam')
+        outputs: dict[str, Path] = self.expected_outputs(cohort=cohort)
+        merged_pgen_path: Path = inputs.as_path(target=cohort, stage=ExportCohortDatasets, key='pgen')
+        merged_pvar_path: Path = inputs.as_path(target=cohort, stage=ExportCohortDatasets, key='pvar')
+        merged_psam_path: Path = inputs.as_path(target=cohort, stage=ExportCohortDatasets, key='psam')
 
         stage_path: list[str] = ['popgen_genotyping', 'snp_qc_report']
         thresholds_path: list[str] = [*stage_path, 'thresholds']
@@ -485,42 +482,57 @@ class SnpQcReport(MultiCohortStage):
             output_audit_tsv_path=str(outputs['audit_tsv']),
             output_inclusion_list_path=str(outputs['inclusion_list']),
             output_summary_tsv_path=str(outputs['summary_tsv']),
-            job_name=f'SnpQcReport_{multicohort.name}',
+            job_name=f'SnpQcReport_{cohort.name}',
         )
 
-        return self.make_outputs(multicohort, data=outputs, jobs=jobs)
+        return self.make_outputs(cohort, data=outputs, jobs=jobs)
 
 
-@stage(required_stages=[Plink2Qc, KingIbdseg, BafRegress], analysis_type='array_qc_report')
-class QcReport(MultiCohortStage):
+@stage(required_stages=[Plink2Qc, KingIbdseg], analysis_type='array_qc_report')
+class QcReport(CohortStage):
     """
-    Create the QC report for an input object.
+    Create the QC report for the super cohort.
+
+    ``BafRegress`` is a phase-1 (per-plate) stage that does not run in phase 2, so
+    its per-plate contamination outputs are sourced by reconstructing the phase-1
+    output paths from the configured ``new_cohort_ids`` rather than via a stage
+    dependency. Coverage is the new plates only; historical plates' BAFRegress
+    stays in prior aggregates' reports.
     """
 
-    def expected_outputs(self, multicohort: MultiCohort) -> Path:
+    def expected_outputs(self, cohort: Cohort) -> Path:
         """
-        Define the expected QC report output file for the multi-cohort.
+        Define the expected QC report output file for the cohort.
         """
-        prefix: Path = get_output_prefix(dataset=multicohort.analysis_dataset, stage_name=self.name)
+        prefix: Path = get_output_prefix(dataset=cohort.dataset, stage_name=self.name)
         datestamp: str = datetime.now(tz=timezone.utc).strftime('%Y%m%d')
         return prefix / f'{datestamp}_qc_report.csv'
 
-    def queue_jobs(self, multicohort: MultiCohort, inputs: StageInput) -> StageOutput:
+    def queue_jobs(self, cohort: Cohort, inputs: StageInput) -> StageOutput:
         """
-        Queue the QC report generation job for the multi-cohort.
+        Queue the QC report generation job for the cohort.
         """
-        outputs: Path = self.expected_outputs(multicohort=multicohort)
+        outputs: Path = self.expected_outputs(cohort=cohort)
 
         # Get the plink2_qc_prefix from the Plink2Qc stage's 'smiss' output
-        plink_qc_smiss_path: Path = inputs.as_path(target=multicohort, stage=Plink2Qc, key='smiss')
+        plink_qc_smiss_path: Path = inputs.as_path(target=cohort, stage=Plink2Qc, key='smiss')
         plink_qc_prefix = str(plink_qc_smiss_path).removesuffix('.smiss')
 
         # Autosomal KING --ibdseg pairwise summary (REL_ID:KINSHIP:INFTYPE)
-        king_seg_path: Path = inputs.as_path(target=multicohort, stage=KingIbdseg, key='seg')
+        king_seg_path: Path = inputs.as_path(target=cohort, stage=KingIbdseg, key='seg')
 
-        # Get all bafregress output paths from all cohorts
-        bafregress_outputs: dict[str, Path] = inputs.as_path_by_target(stage=BafRegress)
-        bafregress_paths: list[str] = [str(baf_out) for baf_out in bafregress_outputs.values()]
+        # Reconstruct the phase-1 per-plate BAFRegress outputs from config (new plates only).
+        new_cohort_ids: list[str] = config_retrieve(['popgen_genotyping', 'merge_cohort_plink', 'new_cohort_ids'])
+        bafregress_paths: list[str] = [
+            paths['txt']
+            for paths in reconstruct_cohort_output_paths(
+                dataset=cohort.dataset,
+                stage_name='BafRegress',
+                cohort_ids=new_cohort_ids,
+                suffixes={'txt': '.BAFRegress.txt'},
+                tmp=False,
+            )
+        ]
 
         # Call the Hail Batch job function
         j: BashJob = run_qc_report(
@@ -528,8 +540,8 @@ class QcReport(MultiCohortStage):
             king_seg_path=str(king_seg_path),
             bafregress_paths=bafregress_paths,
             output_path=str(outputs),
-            job_name=f'QcReport_{multicohort.name}',
+            job_name=f'QcReport_{cohort.name}',
         )
 
         # Return the expected outputs of this stage
-        return self.make_outputs(multicohort, data=outputs, jobs=[j])
+        return self.make_outputs(cohort, data=outputs, jobs=[j])
