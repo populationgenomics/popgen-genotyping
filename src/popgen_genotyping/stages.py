@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from cpg_flow.stage import CohortStage, MultiCohortStage, stage
+from cpg_utils import to_path
 from cpg_utils.config import config_retrieve, reference_path
 
 from popgen_genotyping.jobs.baf_regress_job import run_bafregress
@@ -26,6 +27,7 @@ from popgen_genotyping.metamist_utils import (
     resolve_rolling_aggregate,
 )
 from popgen_genotyping.utils import get_output_prefix
+from popgen_genotyping.utils import get_output_prefix, reconstruct_cohort_output_paths
 
 if TYPE_CHECKING:
     from cpg_flow.stage import StageInput, StageOutput
@@ -168,42 +170,54 @@ class CohortBcfToPlink(CohortStage):
         return self.make_outputs(cohort, data=outputs, jobs=[j])
 
 
-@stage(required_stages=[CohortBcfToPlink])
-class MergeCohortPlink(MultiCohortStage):
+@stage
+class MergeCohortPlink(CohortStage):
     """
-    Merge all cohort PLINK 1.9 datasets into a single unified dataset, with rolling aggregate.
+    Merge all component-cohort PLINK 1.9 datasets into a single unified dataset, with rolling aggregate.
+
+    Runs in phase 2 against the manually-created super cohort. It is the phase-2
+    ``first_stage``, so it has no ``required_stages``: the per-plate PLINK 1.9 inputs
+    are sourced by reconstructing the phase-1 ``CohortBcfToPlink`` output paths from
+    the configured ``new_cohort_ids`` rather than via cross-cohort stage wiring.
     Output is stored in tmp.
     """
 
-    def expected_outputs(self, multicohort: MultiCohort) -> dict[str, Path]:
+    def expected_outputs(self, cohort: Cohort) -> dict[str, Path]:
         """
-        Define the expected multi-cohort PLINK 1.9 fileset in temporary storage.
+        Define the expected merged PLINK 1.9 fileset in temporary storage.
         """
         # Store in tmp per requirement
-        prefix: Path = get_output_prefix(dataset=multicohort.analysis_dataset, stage_name=self.name, tmp=True)
+        prefix: Path = get_output_prefix(dataset=cohort.dataset, stage_name=self.name, tmp=True)
         return {
             'bed': prefix / 'merged_cohorts.bed',
             'bim': prefix / 'merged_cohorts.bim',
             'fam': prefix / 'merged_cohorts.fam',
         }
 
-    def queue_jobs(self, multicohort: MultiCohort, inputs: StageInput) -> StageOutput:
+    def queue_jobs(self, cohort: Cohort, _inputs: StageInput) -> StageOutput:
         """
-        Queue the multi-cohort PLINK 1.9 merge job, incorporating rolling aggregates if configured.
+        Queue the PLINK 1.9 merge job, incorporating rolling aggregates if configured.
         """
-        outputs: dict[str, Path] = self.expected_outputs(multicohort)
+        outputs: dict[str, Path] = self.expected_outputs(cohort)
 
-        # 1. Gather cohort outputs
-        all_cohort_outputs: dict[str, dict[str, Path]] = inputs.as_dict_by_target(stage=CohortBcfToPlink)
-        cohort_plink_paths: list[dict[str, str]] = []
-        for _cohort_id, cohort_outs in all_cohort_outputs.items():
-            cohort_plink_paths.append(
-                {
-                    'bed': str(cohort_outs['bed']),
-                    'bim': str(cohort_outs['bim']),
-                    'fam': str(cohort_outs['fam']),
-                }
-            )
+        # 1. Reconstruct the phase-1 per-plate PLINK 1.9 outputs from config.
+        new_cohort_ids: list[str] = config_retrieve(['popgen_genotyping', 'merge_cohort_plink', 'new_cohort_ids'])
+        cohort_plink_paths: list[dict[str, str]] = reconstruct_cohort_output_paths(
+            dataset=cohort.dataset,
+            stage_name='CohortBcfToPlink',
+            cohort_ids=new_cohort_ids,
+            suffixes={'bed': '.bed', 'bim': '.bim', 'fam': '.fam'},
+            tmp=True,
+        )
+        # Fail loudly if a phase-1 output is missing (e.g. mismatched workflow.version
+        # between phases, or tmp storage has been garbage-collected).
+        for paths in cohort_plink_paths:
+            if not to_path(paths['bed']).exists():
+                raise FileNotFoundError(
+                    f'Expected phase-1 plate PLINK at {paths["bed"]} but it does not exist. '
+                    'Confirm phase 1 ran with the same workflow.version and that tmp storage '
+                    'has not been garbage-collected.'
+                )
 
         # 2. Check for rolling aggregate
         prev_analysis_id: str | None = config_retrieve(
