@@ -220,7 +220,7 @@ class MergeCohortPlink(CohortStage):
 
         # 2. Check for rolling aggregate
         prev_analysis_id: str | None = config_retrieve(
-            ['popgen_genotyping', 'merge_cohort_plink', 'previous_analysis_id'], default=None
+            ['popgen_genotyping', 'merge_cohort_plink', 'previous_aggregate_analysis_id'], default=None
         )
 
         previous_aggregate_plink1_resource: ResourceGroup | None = None

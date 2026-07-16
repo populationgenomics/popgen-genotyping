@@ -42,7 +42,7 @@ The pipeline is configured using a TOML file (e.g., `config.toml`). A template i
     - `af_ref_path` (optional): Path to a VCF containing population allele frequencies for `BafRegress`.
 - `[popgen_genotyping.merge_cohort_plink]` (phase 2 — see below):
     - `new_cohort_ids`: The new plate cohorts processed in phase 1, whose per-plate PLINK 1.9 outputs the merge stage reconstructs and folds in (also used for the BAFRegress paths in the QC report).
-    - `previous_analysis_id` (optional): The Metamist analysis ID of the previous `ExportCohortDatasets` aggregate (PLINK2 `.pgen`) to fold in. Omit on the very first aggregate.
+    - `previous_aggregate_analysis_id` (optional): The Metamist analysis ID of the previous `ExportCohortDatasets` aggregate (PLINK2 `.pgen`) to fold in.
 
 ## Execution
 To run the pipeline, use the `analysis-runner` command. You will need to specify the path to your configuration file, the output directory, and the script to execute.
@@ -77,7 +77,7 @@ single cohort that enumerates its full membership.
    - `input_cohorts = ['COH_super']`
    - `first_stages = ['MergeCohortPlink']`
    - `[popgen_genotyping.merge_cohort_plink] new_cohort_ids = ['COH_new_plate_a', 'COH_new_plate_b']`
-     and (if applicable) `previous_analysis_id = <prev aggregate analysis id>`
+     and (if applicable) `previous_aggregate_analysis_id = <prev aggregate analysis id>`
 
 Phase 2 locates the phase-1 per-plate PLINK 1.9 filesets by reconstructing their
 deterministic output paths from `new_cohort_ids`, so **both phases must use the same
