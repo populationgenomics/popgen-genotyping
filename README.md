@@ -14,7 +14,7 @@ The pipeline is composed of several sequential stages, orchestrated by `cpg-flow
 - **GtcToBcfs**: Converts raw GTC files into two BCF formats: a "Heavy" BCF containing full intensity data and a "Light" BCF containing only genotype calls (GT) and quality scores (GQ).
 - **BafRegress**: Estimates sample contamination by analyzing B-Allele Frequencies (BAF) against a population reference. If no reference is provided, it will estimate AF from the cohort.
 - **CohortBcfToPlink**: Converts the Light BCF into PLINK 1.9 binary format (`.bed`, `.bim`, `.fam`), preparing it for merging.
-- **MergeCohortPlink**: Merges PLINK files from multiple cohorts into a single, unified dataset. This stage also supports a "rolling aggregate" workflow, where new samples can be added to a previously generated aggregate.
+- **MergeCohortPlink**: Merges the new plates' PLINK files into a single, unified dataset, optionally folding in a previously generated aggregate ("rolling aggregate"). Runs in phase 2 against the super cohort — see [Two-phase execution](#two-phase-execution-rolling-aggregates).
 - **ExportCohortDatasets**: Converts the merged PLINK 1.9 dataset into PLINK2 (`.pgen`) format for long-term storage and analysis, and `.bcf` format in temporary storage for ancestry analysis.
 - **Plink2Qc**: Performs a standard suite of quality control checks on the final PLINK2 dataset, including sample/variant missingness, allele frequency, HWE, heterozygosity, and kinship.
 - **KingIbdseg**: Runs KING `--ibdseg --degree 3` against the merged PLINK 1.9 dataset to call pairwise IBD segments. Emits autosomal `.seg` / `.segments.gz` and (when chrX SNPs are present) X-chr companions `X.seg` / `X.segments.gz`, plus the captured KING log. Outputs land in long-term storage and are registered as an `array_relatedness_ibdseg` Metamist analysis; folding the pairwise summary into the QC CSV is tracked as a follow-up.
@@ -40,8 +40,9 @@ The pipeline is configured using a TOML file (e.g., `config.toml`). A template i
     - `bpm_manifest_path`: Path to the Illumina BPM manifest file.
     - `egt_cluster_path`: Path to the Illumina EGT cluster file.
     - `af_ref_path` (optional): Path to a VCF containing population allele frequencies for `BafRegress`.
-- `[popgen_genotyping.rolling_aggregate]`:
-    - `previous_analysis_id` (optional): The Metamist analysis ID of a previous `MergeCohortPlink` output to enable rolling aggregate mode.
+- `[popgen_genotyping.merge_cohort_plink]` (phase 2 — see below):
+    - `new_cohort_ids`: The new plate cohorts processed in phase 1, whose per-plate PLINK 1.9 outputs the merge stage reconstructs and folds in (also used for the BAFRegress paths in the QC report).
+    - `previous_analysis_id` (optional): The Metamist analysis ID of the previous `ExportCohortDatasets` aggregate (PLINK2 `.pgen`) to fold in. Omit on the very first aggregate.
 
 ## Execution
 To run the pipeline, use the `analysis-runner` command. You will need to specify the path to your configuration file, the output directory, and the script to execute.
@@ -53,6 +54,37 @@ analysis-runner
     --config config.toml
     run_workflow.py
 ```
+
+## Two-phase execution (rolling aggregates)
+
+Building a rolling aggregate runs the pipeline in **two separate invocations** with a
+**manual super-cohort creation** in between. This is required because `cpg-flow`
+validates `input_cohorts` against Metamist at graph-build time, so a cohort cannot be
+created mid-run; and because the two phases operate on different cohorts. The aggregate
+is registered against the manually-created "super cohort", giving each aggregate a
+single cohort that enumerates its full membership.
+
+1. **Create the super cohort (manual, Swagger).** Create a Metamist cohort whose
+   membership is the previous aggregate's sequencing groups **plus** the new plates'
+   sequencing groups. It can be created any time before phase 2 (all sequencing groups
+   already exist in Metamist).
+2. **Phase 1 — per-plate processing.** Run with the new plate cohorts as input, stopping
+   before the merge:
+   - `input_cohorts = ['COH_new_plate_a', 'COH_new_plate_b']`
+   - `last_stages = ['BafRegress', 'CohortBcfToPlink']`
+3. **Phase 2 — merge onto the super cohort.** Run with the super cohort as input,
+   starting at the merge:
+   - `input_cohorts = ['COH_super']`
+   - `first_stages = ['MergeCohortPlink']`
+   - `[popgen_genotyping.merge_cohort_plink] new_cohort_ids = ['COH_new_plate_a', 'COH_new_plate_b']`
+     and (if applicable) `previous_analysis_id = <prev aggregate analysis id>`
+
+Phase 2 locates the phase-1 per-plate PLINK 1.9 filesets by reconstructing their
+deterministic output paths from `new_cohort_ids`, so **both phases must use the same
+`workflow.version`**, and phase 2 must run before those tmp outputs are
+garbage-collected (it fails loudly if a fileset is missing). Every stage from
+`MergeCohortPlink` onward runs as a `CohortStage` against the single super cohort, so
+all aggregate/QC analyses register against it.
 
 ## Local Development & Testing
 This repository includes scripts for local development and testing.

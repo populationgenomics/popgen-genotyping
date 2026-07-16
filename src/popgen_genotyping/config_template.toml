@@ -7,8 +7,27 @@ name = 'popgen_genotyping'
 
 # mandatory fields for cpg-flow, not populated by analysis-runner
 dataset = 'ourdna'
-input_cohorts = []
 sequencing_type = 'array'
+
+# This pipeline runs in two phases (two separate invocations), with a manual
+# super-cohort creation in between. See the `merge_cohort_plink` section below.
+#
+#   Manual (before phase 2): create the super cohort in Swagger, with membership =
+#     the previous aggregate's sequencing groups + the new plates' sequencing groups.
+#     It can be created any time before phase 2 (all SGs already exist in Metamist).
+#
+#   Phase 1 (per-plate processing):
+#     input_cohorts = ['COH_new_plate_a', 'COH_new_plate_b']
+#     last_stages = ['BafRegress', 'CohortBcfToPlink']
+#
+#   Phase 2 (merge onto the super cohort):
+#     input_cohorts = ['COH_super']
+#     first_stages = ['MergeCohortPlink']
+#     (set popgen_genotyping.merge_cohort_plink.new_cohort_ids + previous_analysis_id)
+#
+# Both phases MUST use the same `version` below: phase 2 reconstructs the phase-1
+# per-plate output paths (which embed the version) to locate its merge inputs.
+input_cohorts = []
 
 # used to make sure we don't repeat previously completed stages
 check_expected_outputs = true
@@ -41,7 +60,13 @@ storage = '50G'
 cpu = 4
 memory = 'highmem'
 storage = '100G'
-# The Metamist analysis ID of the previous multi-cohort aggregate
+# Phase 2 only. The new plate cohorts processed in phase 1. Their per-plate PLINK 1.9
+# outputs are located by reconstructing the phase-1 CohortBcfToPlink paths (they live
+# in tmp storage, so phase 2 must run before tmp is garbage-collected). Also drives
+# the BAFRegress paths folded into QcReport (new plates only).
+# new_cohort_ids = ['COH_new_plate_a', 'COH_new_plate_b']
+# The Metamist analysis ID of the previous multi-cohort aggregate (PLINK2 pgen).
+# Omit on the very first aggregate.
 # previous_analysis_id = 123456
 
 [popgen_genotyping.export_cohort_datasets]
