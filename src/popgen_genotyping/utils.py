@@ -37,6 +37,38 @@ def get_output_prefix(dataset: Dataset, stage_name: str, tmp: bool = False) -> P
     return prefix / get_workflow().name / stage_name / str(version)
 
 
+def reconstruct_cohort_output_paths(
+    dataset: Dataset,
+    stage_name: str,
+    cohort_ids: list[str],
+    suffixes: dict[str, str],
+    tmp: bool = False,
+) -> list[dict[str, str]]:
+    """
+    Rebuild a prior CohortStage's per-cohort output paths deterministically.
+
+    Used by the phase-2 (super-cohort) stages to locate phase-1 per-plate outputs
+    without cross-cohort stage wiring or a Metamist lookup. The reconstruction is
+    kept in lockstep with production output naming by reusing ``get_output_prefix``;
+    it therefore depends on both phases sharing the same ``workflow.version`` and
+    dataset.
+
+    Args:
+        dataset (Dataset): The CPG Dataset the phase-1 outputs were written under.
+        stage_name (str): Name of the phase-1 stage that produced the outputs.
+        cohort_ids (list[str]): Component cohort IDs to reconstruct paths for.
+        suffixes (dict[str, str]): Mapping of output key to filename suffix, e.g.
+            ``{'bed': '.bed', 'bim': '.bim', 'fam': '.fam'}`` or
+            ``{'txt': '.BAFRegress.txt'}``.
+        tmp (bool): Whether the phase-1 stage wrote to 'tmp' storage. Defaults to False.
+
+    Returns:
+        list[dict[str, str]]: One dict per cohort ID mapping each key to its cloud path.
+    """
+    prefix: Path = get_output_prefix(dataset=dataset, stage_name=stage_name, tmp=tmp)
+    return [{key: str(prefix / f'{cohort_id}{sfx}') for key, sfx in suffixes.items()} for cohort_id in cohort_ids]
+
+
 def get_sequencing_group_cohort(sequencing_group: SequencingGroup) -> Cohort:
     """
     Resolve the cohort a sequencing group belongs to by searching the multi-cohort.
