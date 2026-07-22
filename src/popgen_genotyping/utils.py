@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 FAM_COLUMN_COUNT: int = 6
 
 
-def get_output_prefix(dataset: Dataset, stage_name: str, tmp: bool = False) -> Path:
+def get_output_prefix(dataset: Dataset, stage_name: str, tmp: bool = False, versioned: bool = True) -> Path:
     """
     Standardised output prefix for all stages.
 
@@ -28,13 +28,21 @@ def get_output_prefix(dataset: Dataset, stage_name: str, tmp: bool = False) -> P
         dataset (Dataset): The CPG Dataset object.
         stage_name (str): Name of the current pipeline stage.
         tmp (bool): If True, returns a path in the 'tmp' category. Defaults to False.
+        versioned (bool): If True, appends the ``workflow.version`` segment. Set
+            False for durable per-cohort artifacts that should live at a single
+            stable location, be processed once, and be reused across pipeline
+            versions (discovered via the registered analysis, not a reconstructed
+            path). Defaults to True.
 
     Returns:
         Path: The resolved cloud path prefix.
     """
-    version: int = config_retrieve(['workflow', 'version'], 1)
     prefix: Path = dataset.prefix(category='tmp' if tmp else 'default')
-    return prefix / get_workflow().name / stage_name / str(version)
+    stage_prefix: Path = prefix / get_workflow().name / stage_name
+    if not versioned:
+        return stage_prefix
+    version: int = config_retrieve(['workflow', 'version'], 1)
+    return stage_prefix / str(version)
 
 
 def get_sequencing_group_cohort(sequencing_group: SequencingGroup) -> Cohort:
