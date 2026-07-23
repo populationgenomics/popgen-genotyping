@@ -428,15 +428,16 @@ def test_resolve_bafregress_map_missing_raises():
 
 @patch('popgen_genotyping.metamist_utils.query_cohorts_with_analyses')
 def test_resolve_merge_inputs_rolling(mock_cohorts):
-    # COH5 contains CPG1 (already in the aggregate) and CPG4 (new): aggregate-priority
-    # means only CPG4 is pulled from the plate.
+    # COH_old was already aggregated into COH900 (its SGs are in AGG) → not re-merged
+    # (aggregate-priority). COH5/COH6 are new plates, disjoint from AGG. CPG3 was withdrawn.
     mock_cohorts.return_value = [
         _cohort('COH900', ['CPG1', 'CPG2', 'CPG3'], [_analysis('array_aggregate_pgen', 'gs://b/agg.pgen')]),
-        _cohort('COH5', ['CPG1', 'CPG4'], [_analysis('array_cohort_bed', 'gs://b/COH5.bed')]),
-        _cohort('COH6', ['CPG5'], [_analysis('array_cohort_bed', 'gs://b/COH6.bed')]),
+        _cohort('COH_old', ['CPG1', 'CPG2'], [_analysis('array_cohort_bed', 'gs://b/COH_old.bed')]),
+        _cohort('COH5', ['CPG4', 'CPG5'], [_analysis('array_cohort_bed', 'gs://b/COH5.bed')]),
+        _cohort('COH6', ['CPG6'], [_analysis('array_cohort_bed', 'gs://b/COH6.bed')]),
     ]
 
-    result = resolve_merge_inputs(['CPG1', 'CPG2', 'CPG4', 'CPG5'], 'COH900')
+    result = resolve_merge_inputs(['CPG1', 'CPG2', 'CPG4', 'CPG5', 'CPG6'], 'COH900')
 
     assert result['previous_aggregate_paths'] == {
         'pgen': 'gs://b/agg.pgen',
@@ -444,12 +445,12 @@ def test_resolve_merge_inputs_rolling(mock_cohorts):
         'psam': 'gs://b/agg.psam',
     }
     assert result['samples_to_remove'] == ['CPG3']  # in aggregate, dropped from super cohort
-    assert result['super_cohort_size'] == 4
+    assert result['super_cohort_size'] == 5
 
     plates = {p['cohort_id']: p for p in result['plate_merge_list']}
-    assert set(plates) == {'COH5', 'COH6'}
-    assert plates['COH5']['keep'] == ['CPG4']  # CPG1 NOT re-pulled (aggregate-priority)
-    assert plates['COH6']['keep'] == ['CPG5']
+    assert set(plates) == {'COH5', 'COH6'}  # COH_old NOT pulled — already aggregated
+    assert plates['COH5']['new_count'] == 2
+    assert plates['COH6']['new_count'] == 1
     assert plates['COH5']['bim'] == 'gs://b/COH5.bim'
 
 
@@ -464,7 +465,7 @@ def test_resolve_merge_inputs_bootstrap(mock_cohorts):
     assert result['previous_aggregate_paths'] is None
     assert result['samples_to_remove'] == []
     assert len(result['plate_merge_list']) == 1
-    assert result['plate_merge_list'][0]['keep'] == ['CPG1', 'CPG2']
+    assert result['plate_merge_list'][0]['new_count'] == 2
 
 
 @patch('popgen_genotyping.metamist_utils.query_cohorts_with_analyses')
@@ -504,22 +505,22 @@ def test_format_merge_plan():
         'previous_aggregate_paths': {'pgen': 'x'},
         'samples_to_remove': ['CPG3'],
         'plate_merge_list': [
-            {'cohort_id': 'COH6', 'keep': ['CPG5']},
-            {'cohort_id': 'COH5', 'keep': ['CPG4']},
+            {'cohort_id': 'COH6', 'new_count': 1},
+            {'cohort_id': 'COH5', 'new_count': 2},
         ],
-        'super_cohort_size': 4,
+        'super_cohort_size': 5,
     }
 
     text = format_merge_plan(resolved, 'COH900')
 
     assert 'previous aggregate cohort COH900' in text
-    assert 'super cohort:          4 SGs' in text
+    assert 'super cohort:          5 SGs' in text
     assert 'carried forward:       2 SGs' in text
     assert 'withdrawn:             1 SGs' in text
     assert 'CPG3' in text
-    assert 'COH5:  1 new SGs' in text
+    assert 'COH5:  2 new SGs' in text
     assert 'COH6:  1 new SGs' in text
-    assert 'expected merged total: 4 SGs' in text
+    assert 'expected merged total: 5 SGs' in text
     # Plates are listed sorted by cohort ID.
     assert text.index('COH5:') < text.index('COH6:')
 
@@ -528,7 +529,7 @@ def test_format_merge_plan_bootstrap():
     resolved = {
         'previous_aggregate_paths': None,
         'samples_to_remove': [],
-        'plate_merge_list': [{'cohort_id': 'COH5', 'keep': ['CPG1', 'CPG2']}],
+        'plate_merge_list': [{'cohort_id': 'COH5', 'new_count': 2}],
         'super_cohort_size': 2,
     }
 
