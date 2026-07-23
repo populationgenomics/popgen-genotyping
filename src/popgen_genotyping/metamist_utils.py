@@ -560,10 +560,12 @@ def resolve_merge_inputs(
 
     The super cohort's membership is the source of truth. Given the previous aggregate
     *cohort* ID, its membership (AGG) and its ``array_aggregate_pgen`` PGEN are carried
-    forward; only the delta ``NEW = ALL - AGG`` is pulled from per-plate ``array_cohort_bed``
-    filesets, at SG granularity (aggregate-priority: any SG the aggregate already holds is
-    taken from the aggregate, never re-pulled from a plate). Withdrawn SGs (``AGG - ALL``)
-    are flagged for removal from the carried aggregate.
+    forward. Plate cohorts owning any delta SG (``NEW = ALL - AGG``) are pulled whole from
+    their ``array_cohort_bed`` filesets; the merge job then applies a final ``--keep`` to
+    super-cohort membership, trimming any withdrawn/excluded SGs. A plate is pulled only if
+    it contributes a new SG, so already-aggregated plates are never re-merged
+    (aggregate-priority). Withdrawn SGs (``AGG - ALL``) are flagged for removal from the
+    carried aggregate.
 
     Args:
         super_cohort_sg_ids (Iterable[str]): Active membership of the super cohort.
@@ -575,7 +577,7 @@ def resolve_merge_inputs(
         dict[str, Any]: {
             'previous_aggregate_paths': {'pgen', 'pvar', 'psam'} | None,
             'samples_to_remove': list[str],   # withdrawn SGs to drop from the aggregate
-            'plate_merge_list': list[dict],   # {'bed','bim','fam','cohort_id','keep':[sg,...]}
+            'plate_merge_list': list[dict],   # {'bed','bim','fam','cohort_id','new_count'}
             'super_cohort_size': int,
         }
 
@@ -614,7 +616,12 @@ def resolve_merge_inputs(
     new_sgs = all_sgs - agg_sgs
     samples_to_remove = sorted(agg_sgs - all_sgs)
 
-    # Resolve the delta to per-plate filesets, grouping SGs by their owning plate cohort.
+    # Resolve the delta to the plate cohorts that own the new SGs. Whole filesets are
+    # pulled; the merge job applies a final --keep to super-cohort membership, which trims
+    # any withdrawn/excluded SGs a plate happens to carry. A plate is only pulled if it
+    # contributes a new SG, so already-aggregated plates are never re-merged
+    # (aggregate-priority). New plates never overlap AGG (a re-genotyped sample gets a new
+    # SG ID), so the merge cannot hit a duplicate-sample collision with the carried aggregate.
     bed_map = resolve_cohort_bed_map(cohorts=cohorts)
     plate_groups: dict[str, dict[str, Any]] = {}
     missing: list[str] = []
@@ -623,24 +630,22 @@ def resolve_merge_inputs(
         if fileset is None:
             missing.append(sg_id)
             continue
-        group = plate_groups.setdefault(fileset['cohort_id'], {'fileset': fileset, 'keep': []})
-        group['keep'].append(sg_id)
+        group = plate_groups.setdefault(fileset['cohort_id'], {'fileset': fileset, 'new_count': 0})
+        group['new_count'] += 1
 
     if missing:
         raise ValueError(f'No array_cohort_bed analysis found for new sequencing groups: {sorted(missing)}')
 
-    plate_merge_list: list[dict[str, Any]] = []
-    for group in plate_groups.values():
-        fileset = group['fileset']
-        plate_merge_list.append(
-            {
-                'bed': fileset['bed'],
-                'bim': fileset['bim'],
-                'fam': fileset['fam'],
-                'cohort_id': fileset['cohort_id'],
-                'keep': sorted(group['keep']),
-            }
-        )
+    plate_merge_list: list[dict[str, Any]] = [
+        {
+            'bed': group['fileset']['bed'],
+            'bim': group['fileset']['bim'],
+            'fam': group['fileset']['fam'],
+            'cohort_id': group['fileset']['cohort_id'],
+            'new_count': group['new_count'],
+        }
+        for group in plate_groups.values()
+    ]
 
     return {
         'previous_aggregate_paths': previous_aggregate_paths,
@@ -669,7 +674,7 @@ def format_merge_plan(resolved: dict[str, Any], previous_aggregate_cohort_id: st
     samples_to_remove: list[str] = resolved.get('samples_to_remove', [])
     super_size: int = resolved.get('super_cohort_size', 0)
 
-    new_count: int = sum(len(p['keep']) for p in plate_merge_list)
+    new_count: int = sum(p['new_count'] for p in plate_merge_list)
     carried_forward: int = super_size - new_count
     expected_total: int = carried_forward + new_count
 
@@ -687,6 +692,6 @@ def format_merge_plan(resolved: dict[str, Any], previous_aggregate_cohort_id: st
         f'  new:                   {new_count} SGs from {len(plate_merge_list)} plate cohort(s):',
     ]
     for plate in sorted(plate_merge_list, key=lambda p: p['cohort_id']):
-        lines.append(f'       {plate["cohort_id"]}:  {len(plate["keep"])} new SGs')
+        lines.append(f'       {plate["cohort_id"]}:  {plate["new_count"]} new SGs')
     lines.append(f'  expected merged total: {expected_total} SGs')
     return '\n'.join(lines)
