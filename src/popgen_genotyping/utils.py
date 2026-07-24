@@ -31,8 +31,10 @@ def get_output_prefix(dataset: Dataset, stage_name: str, tmp: bool = False, vers
         versioned (bool): If True, appends the ``workflow.version`` segment. Set
             False for durable per-cohort artifacts that should live at a single
             stable location, be processed once, and be reused across pipeline
-            versions (discovered via the registered analysis, not a reconstructed
-            path). Defaults to True.
+            versions. With no version segment the path is overwritten in place if a
+            cohort is reprocessed, so these outputs must be treated as immutable once
+            an aggregate references them (cpg-flow skips regeneration while they exist).
+            Defaults to True.
 
     Returns:
         Path: The resolved cloud path prefix.

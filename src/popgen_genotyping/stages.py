@@ -92,10 +92,13 @@ class BafRegress(CohortStage):
     """
     Estimate sample contamination for the entire cohort using BAFRegress.
 
-    Output is written to durable, version-independent storage and registered
-    against the cohort as an ``array_bafregress`` analysis. Phase 2's QC report
-    discovers every constituent cohort's contamination estimates via that
-    analysis, so the estimate is computed once per plate and reused across runs.
+    Output is written to durable, version-independent storage and registered against the
+    cohort as an ``array_bafregress`` analysis — computed once per plate and reused across
+    runs. Currently the QC report reads these via stage-wiring
+    (``inputs.as_path_by_target``), which only covers the current run's target cohorts.
+
+    (Deferred to PR 3b: the QC report will instead query all ``array_bafregress`` analyses
+    so the final table covers every constituent cohort of the aggregate, not just new plates.)
     """
 
     def expected_outputs(self, cohort: Cohort) -> Path:
@@ -133,10 +136,13 @@ class CohortBcfToPlink(CohortStage):
     """
     Convert the cohort-level light BCF to PLINK 1.9 format.
 
-    Output is written to durable, version-independent storage and registered
-    against the cohort as an ``array_cohort_bed`` analysis. Phase 2 discovers
-    these per-plate filesets via that analysis rather than reconstructing a tmp
-    path, so the fileset is processed once per plate and reused across runs.
+    Output is written to durable, version-independent storage and registered against the
+    cohort as an ``array_cohort_bed`` analysis. Downstream stages resolve it via
+    ``expected_outputs``; the fileset is processed once per plate and reused across runs.
+
+    (Deferred to PR 3b: phase 2 will discover these filesets by querying the
+    ``array_cohort_bed`` analyses in Metamist instead of stage-wiring; the registration
+    added here is currently write-only.)
     """
 
     def expected_outputs(self, cohort: Cohort) -> dict[str, Path]:
