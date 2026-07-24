@@ -91,13 +91,22 @@ class GtcToBcfs(CohortStage):
 class BafRegress(CohortStage):
     """
     Estimate sample contamination for the entire cohort using BAFRegress.
+
+    Output is written to durable, version-independent storage and registered against the
+    cohort as an ``array_bafregress`` analysis — computed once per plate and reused across
+    runs. Currently the QC report reads these via stage-wiring
+    (``inputs.as_path_by_target``), which only covers the current run's target cohorts.
+
+    (Deferred to PR 3b: the QC report will instead query all ``array_bafregress`` analyses
+    so the final table covers every constituent cohort of the aggregate, not just new plates.)
     """
 
     def expected_outputs(self, cohort: Cohort) -> Path:
         """
-        Define the expected BAFRegress output text file for the cohort.
+        Define the expected BAFRegress output text file in durable, unversioned storage.
         """
-        prefix: Path = get_output_prefix(dataset=cohort.dataset, stage_name=self.name)
+        # Durable, unversioned per-cohort path: processed once, reused across versions.
+        prefix: Path = get_output_prefix(dataset=cohort.dataset, stage_name=self.name, versioned=False)
         return prefix / f'{cohort.id}.BAFRegress.txt'
 
     def queue_jobs(self, cohort: Cohort, inputs: StageInput) -> StageOutput:
@@ -122,19 +131,26 @@ class BafRegress(CohortStage):
         return self.make_outputs(cohort, data=outputs, jobs=[j])
 
 
-@stage(required_stages=[GtcToBcfs])
+@stage(required_stages=[GtcToBcfs], analysis_type='array_cohort_bed', analysis_keys=['bed'])
 class CohortBcfToPlink(CohortStage):
     """
     Convert the cohort-level light BCF to PLINK 1.9 format.
-    Output is stored in tmp.
+
+    Output is written to durable, version-independent storage and registered against the
+    cohort as an ``array_cohort_bed`` analysis. Downstream stages resolve it via
+    ``expected_outputs``; the fileset is processed once per plate and reused across runs.
+
+    (Deferred to PR 3b: phase 2 will discover these filesets by querying the
+    ``array_cohort_bed`` analyses in Metamist instead of stage-wiring; the registration
+    added here is currently write-only.)
     """
 
     def expected_outputs(self, cohort: Cohort) -> dict[str, Path]:
         """
-        Define the expected PLINK 1.9 binary fileset in temporary storage.
+        Define the expected PLINK 1.9 binary fileset in durable, unversioned storage.
         """
-        # Store in tmp per requirement
-        prefix: Path = get_output_prefix(dataset=cohort.dataset, stage_name=self.name, tmp=True)
+        # Durable, unversioned per-cohort path: processed once, reused across versions.
+        prefix: Path = get_output_prefix(dataset=cohort.dataset, stage_name=self.name, versioned=False)
         return {
             'bed': prefix / f'{cohort.id}.bed',
             'bim': prefix / f'{cohort.id}.bim',

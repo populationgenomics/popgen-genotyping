@@ -12,12 +12,67 @@ The pipeline is composed of several sequential stages, orchestrated by `cpg-flow
 
 ### Stages
 - **GtcToBcfs**: Converts raw GTC files into two BCF formats: a "Heavy" BCF containing full intensity data and a "Light" BCF containing only genotype calls (GT) and quality scores (GQ).
-- **BafRegress**: Estimates sample contamination by analyzing B-Allele Frequencies (BAF) against a population reference. If no reference is provided, it will estimate AF from the cohort.
-- **CohortBcfToPlink**: Converts the Light BCF into PLINK 1.9 binary format (`.bed`, `.bim`, `.fam`), preparing it for merging.
-- **MergeCohortPlink**: Merges PLINK files from multiple cohorts into a single, unified dataset. This stage also supports a "rolling aggregate" workflow, where new samples can be added to a previously generated aggregate.
+- **BafRegress**: Estimates sample contamination by analyzing B-Allele Frequencies (BAF) against a population reference. If no reference is provided, it will estimate AF from the cohort. Output is written to durable, version-independent storage and registered as an `array_bafregress` Metamist analysis (one per plate cohort).
+- **CohortBcfToPlink**: Converts the Light BCF into PLINK 1.9 binary format (`.bed`, `.bim`, `.fam`), preparing it for merging. Output is written to durable, version-independent storage and registered as an `array_cohort_bed` Metamist analysis (one per plate cohort). See [Per-plate outputs are immutable](#per-plate-outputs-are-immutable).
+- **MergeCohortPlink**: Merges PLINK files from multiple cohorts into a single, unified dataset. This stage also supports a "rolling aggregate" workflow, where new samples are added to a previously generated aggregate. See [Rolling aggregate & two-phase run](#rolling-aggregate--two-phase-run).
 - **ExportCohortDatasets**: Converts the merged PLINK 1.9 dataset into PLINK2 (`.pgen`) format for long-term storage and analysis, and `.bcf` format in temporary storage for ancestry analysis.
 - **Plink2Qc**: Performs a standard suite of quality control checks on the final PLINK2 dataset, including sample/variant missingness, allele frequency, HWE, heterozygosity, and kinship.
 - **KingIbdseg**: Runs KING `--ibdseg --degree 3` against the merged PLINK 1.9 dataset to call pairwise IBD segments. Emits autosomal `.seg` / `.segments.gz` and (when chrX SNPs are present) X-chr companions `X.seg` / `X.segments.gz`, plus the captured KING log. Outputs land in long-term storage and are registered as an `array_relatedness_ibdseg` Metamist analysis; folding the pairwise summary into the QC CSV is tracked as a follow-up.
+
+### Per-plate outputs are immutable
+`CohortBcfToPlink` and `BafRegress` write to durable, **version-independent** paths
+(`<default_prefix>/<workflow>/<StageName>/<cohort_id>...`, with no `workflow.version`
+segment). This decouples a plate's outputs from the pipeline version — a plate is processed
+once and reused across runs, and phase 2 no longer has to run at the same `workflow.version`
+before `tmp` is garbage-collected to find them.
+
+Because there is no version segment, re-processing a plate **overwrites in place**. cpg-flow
+skips a stage whose `expected_outputs` already exist, so the default is reuse (not silent
+overwrite); an overwrite only happens if the outputs are deleted and regenerated — which
+would change the bytes any prior aggregate was built from. **Treat per-plate outputs as
+immutable once an aggregate references them.** To legitimately re-process a plate, prefer a
+new cohort rather than overwriting an existing one.
+
+### Rolling aggregate & two-phase run
+Aggregate datasets are registered against a **super cohort** (previous aggregate SGs + new
+plate SGs) so downstream consumers (e.g. the genomic atlas) can query array data by cohort.
+cpg-flow cannot create or validate a cohort mid-run, so the pipeline runs in two phases:
+
+1. **Phase 1** — run against the **new plate cohorts** (`input_cohorts=[new plates]`). Produces
+   and registers the per-plate `array_cohort_bed` and `array_bafregress` outputs.
+2. **Create the super cohort** manually in Swagger (previous aggregate SGs ∪ new plate SGs).
+3. **Phase 2** — run against the **super cohort** (`input_cohorts=[super]`). Rolls the previous
+   aggregate forward and merges only the new plates.
+
+The previous aggregate is selected explicitly by **cohort ID** (`previous_aggregate_cohort_id`).
+The new plates are **not listed** in phase-2 config — they are **derived**
+(`NEW = super − previous aggregate`), and each new SG is resolved to its plate via the registered
+`array_cohort_bed` analysis. The resolved plan (the contributing plate cohorts and their new-SG
+counts) is printed to the driver log at submission: **confirm the plates match what you ran in
+phase 1** before letting the run proceed. Use `scripts/list_aggregates.py` to pick the previous
+aggregate cohort.
+
+**Why derive the new plates instead of reusing the phase-1 plate list?** It might look simpler to
+just carry the plate cohorts forward from phase 1, but deriving from the super cohort's membership
+keeps that cohort the single source of truth and is robust to things a hand-carried list gets wrong:
+- **Withdrawn / inactivated SGs** — an SG dropped since phase 1 is simply absent from the super
+  cohort, so it is excluded automatically; a static plate list would silently re-include it.
+- **Plates accumulated across several phase-1 runs** — phase 1 can run many times before a single
+  phase-2 aggregation; you never have to collate every plate cohort ID from all those runs.
+- **Custom / partial selection** — the super cohort can be any hand-picked SG set (a subset of a
+  plate, or spanning plates); per-SG resolution handles this, whereas a plate list cannot.
+- **No config drift** — the merged output cannot disagree with the cohort it is registered against;
+  a `super_cohort ⊆ merged .psam` assert (PR 3b) plus the per-SG coverage check catch any plate
+  never run through phase 1, failing loudly instead of producing a silently short aggregate.
+
+The plan printout is what makes the derivation trustworthy: you get to eyeball the derived plate
+set against your phase-1 runs rather than trusting it blind.
+
+*(Deferred to PR 3a / PR 3b: the two-phase stage conversion, the Metamist-query-based
+resolution of plate/BafRegress inputs, the cohort-ID selector, the final `--keep` to super-cohort
+membership, and the `super_cohort ⊆ merged .psam` reconciliation assert. The `array_cohort_bed`
+registration added now is currently write-only; consumption remains via cpg-flow stage-wiring
+until then.)*
 
 ## Prerequisites
 Before running the pipeline, ensure you have the following tools installed and configured:
@@ -40,8 +95,8 @@ The pipeline is configured using a TOML file (e.g., `config.toml`). A template i
     - `bpm_manifest_path`: Path to the Illumina BPM manifest file.
     - `egt_cluster_path`: Path to the Illumina EGT cluster file.
     - `af_ref_path` (optional): Path to a VCF containing population allele frequencies for `BafRegress`.
-- `[popgen_genotyping.rolling_aggregate]`:
-    - `previous_analysis_id` (optional): The Metamist analysis ID of a previous `MergeCohortPlink` output to enable rolling aggregate mode.
+- `[popgen_genotyping.merge_cohort_plink]`:
+    - `previous_aggregate_cohort_id` (optional): The Metamist **cohort ID** of a previous aggregate to roll forward. Omit for a from-scratch (bootstrap) build. Use `scripts/list_aggregates.py` to list registered aggregate cohorts and pick one. See [Rolling aggregate & two-phase run](#rolling-aggregate--two-phase-run). *(Deferred to PR 3b: the current code still selects the previous aggregate by analysis ID via `merge_cohort_plink.previous_analysis_id`; the cohort-ID switch lands with the phase-2 conversion.)*
 
 ## Execution
 To run the pipeline, use the `analysis-runner` command. You will need to specify the path to your configuration file, the output directory, and the script to execute.
