@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""Ad hoc script to list registered array aggregate analyses in a Metamist project.
+"""Ad hoc script to list registered array aggregate cohorts in a Metamist project.
 
 Run locally; it only needs Metamist auth (e.g. ``gcloud auth application-default login``)
 and does NOT read any cpg-flow pipeline config or run via analysis-runner:
@@ -8,12 +8,13 @@ and does NOT read any cpg-flow pipeline config or run via analysis-runner:
     python scripts/list_aggregates.py
     python scripts/list_aggregates.py --analysis-type array_aggregate_pgen
 
-Use it to pick the ``previous_aggregate_analysis_id`` for a rolling-aggregate (phase-2) run.
+Use it to pick the ``previous_aggregate_cohort_id`` for a rolling-aggregate (phase-2) run.
 
-Aggregates register against a cohort (with empty sequencing_group_ids), so the sample
-count is read from the cohort, not the analysis. An aggregate normally maps to a single
-cohort; legacy aggregates registered against multiple input plate cohorts map to several
-(shown with a ``[legacy]`` marker).
+Aggregates register against a cohort (with empty sequencing_group_ids), so discovery is
+cohort-first: the sample count and the rolling-forward handle both come from the cohort,
+not the analysis. The analysis ID / output path are shown for reference only. An aggregate
+normally maps to a single cohort; a legacy aggregate registered against multiple input
+plate cohorts appears once per cohort, flagged ``[legacy]``.
 """
 
 from __future__ import annotations
@@ -54,46 +55,56 @@ def list_previous_aggregates(
     analysis_type: str = 'array_aggregate_pgen',
 ) -> list[dict[str, Any]]:
     """
-    List registered aggregate analyses in a Metamist project, grouped by analysis ID.
+    List cohorts carrying a registered aggregate analysis in a Metamist project.
 
     Args:
         project (str): Metamist project name. Defaults to 'ourdna'.
         analysis_type (str): Analysis type to list. Defaults to 'array_aggregate_pgen'.
 
     Returns:
-        list[dict[str, Any]]: One entry per aggregate analysis, newest first, each with
-            keys ``analysis_id``, ``created`` (timestampCompleted), ``output`` (pgen path),
-            and ``cohorts`` (list of ``{'cohort_id', 'cohort_name', 'num_sgs'}``).
+        list[dict[str, Any]]: One entry per cohort that has an ``analysis_type`` analysis,
+            newest first, each with keys ``cohort_id``, ``cohort_name``, ``num_sgs``,
+            ``created`` (latest analysis timestamp), ``analysis_id`` and ``output`` (pgen
+            path, both for reference), and ``legacy`` (True if that analysis is shared
+            across multiple cohorts — an old-style multi-cohort registration).
     """
     result: dict[str, Any] = query(QUERY_AGGREGATE_ANALYSES, {'project': project})
     cohorts: list[dict[str, Any]] = (result.get('project') or {}).get('cohorts', [])
 
-    by_analysis: dict[int, dict[str, Any]] = {}
+    # First pass: how many cohorts each aggregate analysis spans (for legacy detection).
+    analysis_cohort_counts: dict[int, int] = {}
     for cohort in cohorts:
-        num_sgs: int = len(cohort.get('sequencingGroups') or [])
         for analysis in cohort.get('analyses', []):
-            if analysis.get('type') != analysis_type:
-                continue
-            analysis_id: int = analysis.get('id')
-            outputs = analysis.get('outputs')
-            output_path = outputs.get('path') if isinstance(outputs, dict) else outputs
-            entry = by_analysis.setdefault(
-                analysis_id,
-                {
-                    'analysis_id': analysis_id,
-                    'created': analysis.get('timestampCompleted'),
-                    'output': output_path,
-                    'cohorts': [],
-                },
-            )
-            entry['cohorts'].append(
-                {'cohort_id': cohort.get('id'), 'cohort_name': cohort.get('name'), 'num_sgs': num_sgs}
-            )
+            if analysis.get('type') == analysis_type:
+                aid = analysis.get('id')
+                analysis_cohort_counts[aid] = analysis_cohort_counts.get(aid, 0) + 1
 
-    aggregates: list[dict[str, Any]] = list(by_analysis.values())
-    # Newest first; fall back to analysis ID when timestamps are equal/missing.
-    aggregates.sort(key=lambda a: (a['created'] or '', a['analysis_id'] or 0), reverse=True)
-    return aggregates
+    # Second pass: one row per cohort, using its latest aggregate analysis.
+    entries: list[dict[str, Any]] = []
+    for cohort in cohorts:
+        aggregates = [a for a in cohort.get('analyses', []) if a.get('type') == analysis_type]
+        if not aggregates:
+            continue
+
+        latest = max(aggregates, key=lambda a: (a.get('timestampCompleted') or '', a.get('id') or 0))
+        outputs = latest.get('outputs')
+        output_path = outputs.get('path') if isinstance(outputs, dict) else outputs
+
+        entries.append(
+            {
+                'cohort_id': cohort.get('id'),
+                'cohort_name': cohort.get('name'),
+                'num_sgs': len(cohort.get('sequencingGroups') or []),
+                'created': latest.get('timestampCompleted'),
+                'analysis_id': latest.get('id'),
+                'output': output_path,
+                'legacy': analysis_cohort_counts.get(latest.get('id'), 0) > 1,
+            }
+        )
+
+    # Newest first; fall back to cohort ID when timestamps are equal/missing.
+    entries.sort(key=lambda e: (e['created'] or '', e['cohort_id'] or ''), reverse=True)
+    return entries
 
 
 def _format_table(aggregates: list[dict[str, Any]]) -> str:
@@ -104,24 +115,21 @@ def _format_table(aggregates: list[dict[str, Any]]) -> str:
         aggregates (list[dict[str, Any]]): Output of ``list_previous_aggregates``.
 
     Returns:
-        str: The formatted table (header + one row per aggregate).
+        str: The formatted table (header + one row per cohort).
     """
-    headers = ('ANALYSIS_ID', 'CREATED', 'COHORT', 'N_SGS', 'OUTPUT')
-    rows: list[tuple[str, str, str, str, str]] = []
+    headers = ('COHORT_ID', 'COHORT_NAME', 'N_SGS', 'CREATED', 'ANALYSIS_ID', 'OUTPUT')
+    rows: list[tuple[str, str, str, str, str, str]] = []
     for agg in aggregates:
-        cohorts = agg['cohorts']
-        if len(cohorts) == 1:
-            cohort_str = cohorts[0]['cohort_name'] or cohorts[0]['cohort_id'] or '-'
-            sgs_str = str(cohorts[0]['num_sgs'])
-        else:
-            cohort_str = ', '.join((c['cohort_name'] or c['cohort_id'] or '?') for c in cohorts) + ' [legacy]'
-            sgs_str = ', '.join(str(c['num_sgs']) for c in cohorts)
+        cohort_name = agg['cohort_name'] or agg['cohort_id'] or '-'
+        if agg['legacy']:
+            cohort_name += ' [legacy]'
         rows.append(
             (
-                str(agg['analysis_id']),
+                str(agg['cohort_id'] or '-'),
+                cohort_name,
+                str(agg['num_sgs']),
                 str(agg['created'] or '-'),
-                cohort_str,
-                sgs_str,
+                str(agg['analysis_id'] or '-'),
                 str(agg['output'] or '-'),
             )
         )
