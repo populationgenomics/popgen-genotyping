@@ -62,7 +62,7 @@ keeps that cohort the single source of truth and is robust to things a hand-carr
 - **Custom / partial selection** — the super cohort can be any hand-picked SG set (a subset of a
   plate, or spanning plates); per-SG resolution handles this, whereas a plate list cannot.
 - **No config drift** — the merged output cannot disagree with the cohort it is registered against;
-  a `super_cohort ⊆ merged .psam` assert (PR 3b) plus the per-SG coverage check catch any plate
+  the post-`--keep` kept-sample-count assert plus the per-SG coverage check catch any plate
   never run through phase 1, failing loudly instead of producing a silently short aggregate.
 
 The plan printout is what makes the derivation trustworthy: you get to eyeball the derived plate
