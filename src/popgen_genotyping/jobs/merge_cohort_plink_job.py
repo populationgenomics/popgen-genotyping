@@ -20,38 +20,39 @@ if TYPE_CHECKING:
 def run_merge_plink(
     cohort_plink_paths: list[dict[str, str]],
     output_prefix: str,
+    keep_samples: list[str],
     previous_aggregate_resource: ResourceGroup | None = None,
     samples_to_remove: list[str] | None = None,
-    keep_samples: list[str] | None = None,
     job_name: str = 'merge_cohort_plink',
 ) -> BashJob:
     """
     Merge multiple PLINK 1.9 datasets into a single unified dataset, with rolling aggregate support.
 
+    Whole plate filesets are merged into an intermediate fileset (a plate may carry
+    withdrawn/excluded SGs), then a final ``plink --keep`` pass trims the merged result to
+    exactly ``keep_samples`` (the super-cohort membership).
+
     Args:
         cohort_plink_paths (list[dict[str, str]]): List of dicts, each with 'bed', 'bim', 'fam' cloud paths.
         output_prefix (str): Cloud prefix for the final merged PLINK 1.9 files.
+        keep_samples (list[str]): SG IDs to retain in the final fileset (the super cohort). The merged
+            result is trimmed to exactly this membership.
         previous_aggregate_resource (ResourceGroup, optional): Resource group for the previous rolling aggregate.
         samples_to_remove (list[str], optional): List of SG IDs to remove from the previous aggregate.
-        keep_samples (list[str], optional): SG IDs to retain in the final fileset. Whole plate filesets are
-            merged (a plate may carry withdrawn/excluded SGs), so a final ``plink --keep`` pass trims the
-            merged result to exactly this membership (the super cohort). When None (the default) no trim is
-            applied and the merged fileset is written as-is — the pre-two-phase behaviour.
         job_name (str): Name for the Hail Batch job.
 
     Returns:
         Job: A Hail Batch job object.
 
     Raises:
-        ValueError: If ``keep_samples`` is an empty list — distinct from ``None`` (the
-            documented no-trim opt-out), an empty list means a caller/config bug and would
-            otherwise silently skip the trim and write the untrimmed merge as the aggregate.
+        ValueError: If ``keep_samples`` is empty — trimming the merge to the super cohort is
+            mandatory, so an empty membership means a caller/config bug and would otherwise
+            write the untrimmed merge as the aggregate.
     """
-    # Distinguish None (opt out of trimming) from [] (a caller bug). The truthiness checks
-    # below would treat both the same and skip the trim — the exact outcome the trim exists
-    # to prevent — so reject an empty list up front, before building the batch.
-    if keep_samples is not None and not keep_samples:
-        raise ValueError('keep_samples was provided but empty — refusing to write an untrimmed fileset')
+    # Trimming to the super cohort is mandatory; an empty membership is a caller/config bug
+    # that would otherwise write the untrimmed merge as the aggregate. Reject it up front.
+    if not keep_samples:
+        raise ValueError('keep_samples is empty — refusing to write an untrimmed fileset')
 
     b = get_batch()
     j = register_job(
