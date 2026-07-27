@@ -19,6 +19,7 @@ jobs:
     environment: 'production'
     outputs:
       matrix: ${{ steps.get_next_version.outputs.next_version }}
+      image_tag: ${{ steps.get_next_version.outputs.image_tag }}
     steps:
       - name: 'Checkout repo'
         uses: actions/checkout@v4
@@ -49,6 +50,8 @@ jobs:
         run: |
           next_version=$(python .github/workflows/get_version.py)
           echo "next_version=$next_version" >> "$GITHUB_OUTPUT"
+          image_tag=$(echo "$next_version" | python3 -c "import json,sys; print(json.loads(sys.stdin.read())['include'][0]['tag'])")
+          echo "image_tag=$image_tag" >> "$GITHUB_OUTPUT"
 
   build_deploy_main:
     runs-on: ubuntu-latest
@@ -94,8 +97,9 @@ jobs:
           docker push "${{ env.IMAGES_PREFIX }}/${{ matrix.name }}:latest"
 
   run_tests:
-    needs: [build_deploy_main]
+    needs: [get_next_version, build_deploy_main]
     uses: ./.github/workflows/test.yaml
     with:
-      image_tag: latest
+      image_tag: ${{ needs.get_next_version.outputs.image_tag }}
+      image_registry: images
     secrets: inherit
