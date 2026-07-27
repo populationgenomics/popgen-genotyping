@@ -165,27 +165,32 @@ def run_merge_plink(
     #    merged (a plate may carry withdrawn/excluded SGs), so this final --keep is what
     #    guarantees merged ⊆ super cohort. Uses the same FID=0 / IID convention as the
     #    --remove list above.
-    if keep_samples:
-        keep_list_path = f'{output_prefix}_samples_to_keep.txt'
-        to_path(keep_list_path).write_text('\n'.join([f'0\t{s}' for s in keep_samples]))
-        keep_samples_resource = b.read_input(keep_list_path)
+    keep_list_path = f'{output_prefix}_samples_to_keep.txt'
+    to_path(keep_list_path).write_text('\n'.join([f'0\t{s}' for s in keep_samples]))
+    keep_samples_resource = b.read_input(keep_list_path)
 
-        # --keep-allele-order: preserve the A1=ALT/A2=REF orientation through the trim
-        # (PLINK 1.9 otherwise resets A1 to the minor allele).
-        j.command(
-            f"""
-            set -ex
-            plink --bfile {merge_target} --allow-extra-chr --output-chr chrM \\
-                --keep {keep_samples_resource} \\
-                --keep-allele-order --make-bed --out {j.output_plink}
+    # --keep-allele-order: preserve the A1=ALT/A2=REF orientation through the trim
+    # (PLINK 1.9 otherwise resets A1 to the minor allele).
+    #
+    # Membership assert: plink --keep silently drops keep-list IIDs absent from the merged
+    # fileset, so the trim yields merged ∩ keep_samples, not keep_samples — a plate whose
+    # array_cohort_bed claims an SG its .fam does not contain would vanish with exit 0. The
+    # trimmed set is already a subset of keep_samples, so an equal count proves equality;
+    # fail loudly otherwise (guards super ⊆ merged).
+    j.command(
+        f"""
+        set -ex
+        plink --bfile {merge_target} --allow-extra-chr --output-chr chrM \\
+            --keep {keep_samples_resource} \\
+            --keep-allele-order --make-bed --out {j.output_plink}
 
-            kept=$(wc -l < {j.output_plink.fam})
-            if [ "$kept" -ne {len(keep_samples)} ]; then
-                echo "expected {len(keep_samples)} samples after --keep, got $kept" >&2
-                exit 1
-            fi
-            """
-        )
+        kept=$(wc -l < {j.output_plink.fam})
+        if [ "$kept" -ne {len(keep_samples)} ]; then
+            echo "expected {len(keep_samples)} samples after --keep, got $kept" >&2
+            exit 1
+        fi
+        """
+    )
 
     # 6. Write outputs back to cloud
     b.write_output(j.output_plink, output_prefix)
