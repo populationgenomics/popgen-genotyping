@@ -24,7 +24,8 @@ def _run_merge_plink(
         cohort_plink_paths: New per-plate filesets to merge (defaults to a single cohort).
         previous_aggregate_resource: Optional rolling-aggregate resource group.
         samples_to_remove: Optional withdrawn SGs to drop from the previous aggregate.
-        keep_samples: Optional super-cohort membership to trim the merged fileset to.
+        keep_samples: Super-cohort membership to trim to (defaults to a two-SG cohort; pass an
+            explicit list — including [] — to exercise the trim/guard behaviour).
 
     Returns:
         tuple[list[str], MagicMock]: (bash strings passed to j.command() in queue order, to_path mock).
@@ -42,9 +43,9 @@ def _run_merge_plink(
         run_merge_plink(
             cohort_plink_paths=cohort_plink_paths if cohort_plink_paths is not None else _DEFAULT_COHORT_PATHS,
             output_prefix='gs://o/out',
+            keep_samples=keep_samples if keep_samples is not None else ['SG1', 'SG2'],
             previous_aggregate_resource=previous_aggregate_resource,
             samples_to_remove=samples_to_remove,
-            keep_samples=keep_samples,
         )
 
     commands = [call.args[0] for call in mock_job.command.call_args_list]
@@ -76,25 +77,13 @@ def test_rolling_aggregate_path_preserves_allele_order_throughout() -> None:
     assert '--keep-allele-order' in commands[1]
 
 
-def test_no_keep_samples_adds_no_trim_step() -> None:
-    """keep_samples=None (default) must not queue a --keep pass — the pre-two-phase behaviour."""
-    commands, mock_to_path = _run_merge_plink()
-
-    # A single input fileset with no aggregate collapses to one --make-bed command.
-    assert len(commands) == 1
-    assert '--merge-list' not in commands[0]
-    # '--keep ' (trailing space) is the sample-filter flag; '--keep-allele-order' is unrelated.
-    assert not any('--keep ' in c for c in commands)
-    mock_to_path.assert_not_called()
-
-
 def test_empty_keep_samples_raises() -> None:
-    """An empty keep list is a caller/config bug — distinct from None — and must fail fast.
+    """An empty keep list is a caller/config bug and must fail fast.
 
-    Both trim guards are truthiness checks, so [] would silently skip the trim and write the
+    Trimming to the super cohort is mandatory, so an empty membership would otherwise write the
     untrimmed merge as the aggregate: the exact outcome the trim exists to prevent.
     """
-    with pytest.raises(ValueError, match='keep_samples was provided but empty'):
+    with pytest.raises(ValueError, match='keep_samples is empty'):
         _run_merge_plink(keep_samples=[])
 
 
@@ -109,6 +98,9 @@ def test_keep_samples_appends_final_keep_trim() -> None:
     assert '--keep ' in trim, 'final step must be the super-cohort --keep trim'
     assert '--keep-allele-order' in trim
     assert '--output-chr chrM' in trim
+    # Membership assert: the trimmed .fam must contain exactly len(keep_samples) rows, else
+    # plink --keep silently dropped a claimed SG (super ⊆ merged goes unverified otherwise).
+    assert 'wc -l' in trim and '-ne 2' in trim, 'final step must assert the kept-sample count'
 
 
 def test_keep_samples_writes_fid_iid_list() -> None:
