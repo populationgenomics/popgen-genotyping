@@ -105,9 +105,8 @@ def run_merge_plink(
         resource = b.read_input_group(bed=paths['bed'], bim=paths['bim'], fam=paths['fam'])
         staged_prefixes.append(str(resource))
 
-    # 3. Define output resource groups. When keep_samples is set the merge lands in an
-    #    intermediate fileset and a final --keep pass (step 5) trims it to super-cohort
-    #    membership; otherwise the merge writes straight to the final output.
+    # 3. Define output resource groups. The merge lands in an intermediate fileset and a
+    #    final --keep pass (step 5) trims it to super-cohort membership.
     j.declare_resource_group(
         output_plink={
             'bed': '{root}.bed',
@@ -115,17 +114,14 @@ def run_merge_plink(
             'fam': '{root}.fam',
         }
     )
-    if keep_samples:
-        j.declare_resource_group(
-            merged_untrimmed={
-                'bed': '{root}.bed',
-                'bim': '{root}.bim',
-                'fam': '{root}.fam',
-            }
-        )
-        merge_target = j.merged_untrimmed
-    else:
-        merge_target = j.output_plink
+    j.declare_resource_group(
+        merged_untrimmed={
+            'bed': '{root}.bed',
+            'bim': '{root}.bim',
+            'fam': '{root}.fam',
+        }
+    )
+    merge_target = j.merged_untrimmed
 
     # 4. Construct merge list and execute
     # Note: PLINK 1.9 --merge-list expects prefixes of datasets to merge
