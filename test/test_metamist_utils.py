@@ -12,12 +12,10 @@ from popgen_genotyping.metamist_utils import (
     parse_genotyping_manifest,
     query_cohorts_with_analyses,
     query_genotyping_manifests,
-    query_previous_aggregate,
     resolve_bafregress_map,
     resolve_cohort_bed_map,
     resolve_gtc_path,
     resolve_merge_inputs,
-    resolve_rolling_aggregate,
 )
 
 
@@ -206,111 +204,6 @@ def test_query_genotyping_manifests_no_results(mock_config, mock_query):
 
     manifests = query_genotyping_manifests('ourdna')
     assert manifests == []
-
-
-@patch('popgen_genotyping.metamist_utils.query')
-def test_query_previous_aggregate(mock_query):
-    mock_query.return_value = {
-        'analyses': [
-            {
-                'outputs': {'path': 'gs://path/merged.pgen'},
-                'project': {'sequencingGroups': [{'id': 'CPG001'}, {'id': 'CPG002'}]},
-            }
-        ]
-    }
-
-    outputs, active_sgs = query_previous_aggregate(123)
-
-    assert outputs == {
-        'pgen': 'gs://path/merged.pgen',
-        'psam': 'gs://path/merged.psam',
-        'pvar': 'gs://path/merged.pvar',
-    }
-    assert active_sgs == ['CPG001', 'CPG002']
-    mock_query.assert_called_once()
-
-
-@patch('popgen_genotyping.metamist_utils.query')
-def test_query_previous_aggregate_active_only(mock_query):
-    """
-    Test that query_previous_aggregate returns only active samples.
-    """
-    # Mocking a response where one sample (CPG003) is inactive and thus excluded from the response
-    mock_query.return_value = {
-        'analyses': [
-            {
-                'outputs': {'path': 'gs://path/merged.pgen'},
-                'project': {
-                    'sequencingGroups': [{'id': 'CPG001'}, {'id': 'CPG002'}]
-                    # CPG003 is missing because it's inactive
-                },
-            }
-        ]
-    }
-
-    _outputs, active_sgs = query_previous_aggregate(123)
-
-    expected_count = 2
-    assert len(active_sgs) == expected_count
-    assert 'CPG001' in active_sgs
-    assert 'CPG002' in active_sgs
-    assert 'CPG003' not in active_sgs
-
-
-@patch('popgen_genotyping.metamist_utils.query')
-def test_query_previous_aggregate_missing_path_raises(mock_query):
-    """A previous-aggregate analysis whose outputs lack a `path` field is invalid."""
-    mock_query.return_value = {
-        'analyses': [
-            {
-                'outputs': {},
-                'project': {'sequencingGroups': []},
-            }
-        ]
-    }
-
-    with pytest.raises(ValueError, match='valid PGEN output path'):
-        query_previous_aggregate(123)
-
-
-@patch('popgen_genotyping.metamist_utils.query')
-def test_query_previous_aggregate_non_pgen_path_raises(mock_query):
-    """A previous-aggregate path that doesn't end in `.pgen` is rejected."""
-    mock_query.return_value = {
-        'analyses': [
-            {
-                'outputs': {'path': 'gs://path/merged.bed'},
-                'project': {'sequencingGroups': []},
-            }
-        ]
-    }
-
-    with pytest.raises(ValueError, match='valid PGEN output path'):
-        query_previous_aggregate(123)
-
-
-@patch('popgen_genotyping.metamist_utils.query_previous_aggregate')
-@patch('popgen_genotyping.utils.parse_psam')
-def test_resolve_rolling_aggregate_with_removed_sample(mock_parse_psam, mock_query_prev):
-    """
-    Test that resolve_rolling_aggregate correctly identifies samples to remove.
-    """
-    # Mock previous aggregate outputs and current active samples
-    # Current active samples: CPG001 and CPG002
-    mock_query_prev.return_value = (
-        {'pgen': 'gs://path/merged.pgen', 'pvar': 'gs://path/merged.pvar', 'psam': 'gs://path/merged.psam'},
-        ['CPG001', 'CPG002'],
-    )
-
-    # Mock previous aggregate FAM file content: CPG001, CPG002, and CPG003
-    mock_parse_psam.return_value = ['CPG001', 'CPG002', 'CPG003']
-
-    # Execute
-    paths, to_remove = resolve_rolling_aggregate(123)
-
-    # Verify
-    assert paths == {'pgen': 'gs://path/merged.pgen', 'pvar': 'gs://path/merged.pvar', 'psam': 'gs://path/merged.psam'}
-    assert to_remove == ['CPG003']
 
 
 # ---------------------------------------------------------------------------
