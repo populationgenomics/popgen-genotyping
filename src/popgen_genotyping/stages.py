@@ -229,8 +229,7 @@ class MergeCohortPlink(CohortStage):
         logging.info(format_merge_plan(resolved, previous_aggregate_cohort_id))
 
         cohort_plink_paths: list[dict[str, str]] = [
-            {'bed': plate['bed'], 'bim': plate['bim'], 'fam': plate['fam']}
-            for plate in resolved['plate_merge_list']
+            {'bed': plate['bed'], 'bim': plate['bim'], 'fam': plate['fam']} for plate in resolved['plate_merge_list']
         ]
 
         # 2. Carry the previous aggregate forward, if any. It is stored as PLINK2, so convert
