@@ -170,6 +170,12 @@ def run_merge_plink(
             plink --bfile {merge_target} --allow-extra-chr --output-chr chrM \\
                 --keep {keep_samples_resource} \\
                 --keep-allele-order --make-bed --out {j.output_plink}
+
+            kept=$(wc -l < {j.output_plink.fam})
+            if [ "$kept" -ne {len(keep_samples)} ]; then
+                echo "expected {len(keep_samples)} samples after --keep, got $kept" >&2
+                exit 1
+            fi
             """
         )
 
