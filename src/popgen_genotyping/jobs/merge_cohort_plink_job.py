@@ -22,6 +22,7 @@ def run_merge_plink(
     output_prefix: str,
     previous_aggregate_resource: ResourceGroup | None = None,
     samples_to_remove: list[str] | None = None,
+    keep_samples: list[str] | None = None,
     job_name: str = 'merge_cohort_plink',
 ) -> BashJob:
     """
@@ -32,6 +33,10 @@ def run_merge_plink(
         output_prefix (str): Cloud prefix for the final merged PLINK 1.9 files.
         previous_aggregate_resource (ResourceGroup, optional): Resource group for the previous rolling aggregate.
         samples_to_remove (list[str], optional): List of SG IDs to remove from the previous aggregate.
+        keep_samples (list[str], optional): SG IDs to retain in the final fileset. Whole plate filesets are
+            merged (a plate may carry withdrawn/excluded SGs), so a final ``plink --keep`` pass trims the
+            merged result to exactly this membership (the super cohort). When None (the default) no trim is
+            applied and the merged fileset is written as-is — the pre-two-phase behaviour.
         job_name (str): Name for the Hail Batch job.
 
     Returns:
@@ -88,7 +93,9 @@ def run_merge_plink(
         resource = b.read_input_group(bed=paths['bed'], bim=paths['bim'], fam=paths['fam'])
         staged_prefixes.append(str(resource))
 
-    # 3. Define output resource group
+    # 3. Define output resource groups. When keep_samples is set the merge lands in an
+    #    intermediate fileset and a final --keep pass (step 5) trims it to super-cohort
+    #    membership; otherwise the merge writes straight to the final output.
     j.declare_resource_group(
         output_plink={
             'bed': '{root}.bed',
@@ -96,6 +103,17 @@ def run_merge_plink(
             'fam': '{root}.fam',
         }
     )
+    if keep_samples:
+        j.declare_resource_group(
+            merged_plink={
+                'bed': '{root}.bed',
+                'bim': '{root}.bim',
+                'fam': '{root}.fam',
+            }
+        )
+        merge_target = j.merged_plink
+    else:
+        merge_target = j.output_plink
 
     # 4. Construct merge list and execute
     # Note: PLINK 1.9 --merge-list expects prefixes of datasets to merge
@@ -114,7 +132,7 @@ def run_merge_plink(
                 --output-chr chrM \
                 --make-bed \
                 --keep-allele-order \
-                --out {j.output_plink}
+                --out {merge_target}
             """
         )
     else:
@@ -131,11 +149,31 @@ def run_merge_plink(
                 --output-chr chrM \
                 --make-bed \
                 --keep-allele-order \
-                --out {j.output_plink}
+                --out {merge_target}
             """
         )
 
-    # 5. Write outputs back to cloud
+    # 5. Trim the merged fileset to the super-cohort membership. Whole plate filesets are
+    #    merged (a plate may carry withdrawn/excluded SGs), so this final --keep is what
+    #    guarantees merged ⊆ super cohort. Uses the same FID=0 / IID convention as the
+    #    --remove list above.
+    if keep_samples:
+        keep_list_path = f'{output_prefix}_samples_to_keep.txt'
+        to_path(keep_list_path).write_text('\n'.join([f'0\t{s}' for s in keep_samples]))
+        keep_samples_resource = b.read_input(keep_list_path)
+
+        # --keep-allele-order: preserve the A1=ALT/A2=REF orientation through the trim
+        # (PLINK 1.9 otherwise resets A1 to the minor allele).
+        j.command(
+            f"""
+            set -ex
+            plink --bfile {merge_target} --allow-extra-chr --output-chr chrM \\
+                --keep {keep_samples_resource} \\
+                --keep-allele-order --make-bed --out {j.output_plink}
+            """
+        )
+
+    # 6. Write outputs back to cloud
     b.write_output(j.output_plink, output_prefix)
 
     return j
