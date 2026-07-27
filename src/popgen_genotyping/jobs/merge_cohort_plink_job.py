@@ -41,7 +41,18 @@ def run_merge_plink(
 
     Returns:
         Job: A Hail Batch job object.
+
+    Raises:
+        ValueError: If ``keep_samples`` is an empty list — distinct from ``None`` (the
+            documented no-trim opt-out), an empty list means a caller/config bug and would
+            otherwise silently skip the trim and write the untrimmed merge as the aggregate.
     """
+    # Distinguish None (opt out of trimming) from [] (a caller bug). The truthiness checks
+    # below would treat both the same and skip the trim — the exact outcome the trim exists
+    # to prevent — so reject an empty list up front, before building the batch.
+    if keep_samples is not None and not keep_samples:
+        raise ValueError('keep_samples was provided but empty — refusing to write an untrimmed fileset')
+
     b = get_batch()
     j = register_job(
         batch=b,

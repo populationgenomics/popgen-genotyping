@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from popgen_genotyping.jobs.merge_cohort_plink_job import run_merge_plink
 
 _DEFAULT_COHORT_PATHS = [{'bed': 'gs://x/c1.bed', 'bim': 'gs://x/c1.bim', 'fam': 'gs://x/c1.fam'}]
@@ -84,6 +86,16 @@ def test_no_keep_samples_adds_no_trim_step() -> None:
     # '--keep ' (trailing space) is the sample-filter flag; '--keep-allele-order' is unrelated.
     assert not any('--keep ' in c for c in commands)
     mock_to_path.assert_not_called()
+
+
+def test_empty_keep_samples_raises() -> None:
+    """An empty keep list is a caller/config bug — distinct from None — and must fail fast.
+
+    Both trim guards are truthiness checks, so [] would silently skip the trim and write the
+    untrimmed merge as the aggregate: the exact outcome the trim exists to prevent.
+    """
+    with pytest.raises(ValueError, match='keep_samples was provided but empty'):
+        _run_merge_plink(keep_samples=[])
 
 
 def test_keep_samples_appends_final_keep_trim() -> None:
