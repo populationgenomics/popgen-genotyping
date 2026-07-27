@@ -68,11 +68,9 @@ keeps that cohort the single source of truth and is robust to things a hand-carr
 The plan printout is what makes the derivation trustworthy: you get to eyeball the derived plate
 set against your phase-1 runs rather than trusting it blind.
 
-*(Deferred to PR 3a / PR 3b: the two-phase stage conversion, the Metamist-query-based
-resolution of plate/BafRegress inputs, the cohort-ID selector, the final `--keep` to super-cohort
-membership, and the `super_cohort ⊆ merged .psam` reconciliation assert. The `array_cohort_bed`
-registration added now is currently write-only; consumption remains via cpg-flow stage-wiring
-until then.)*
+The final `plink --keep` trims the merged fileset to super-cohort membership (`merged ⊆ super`) and
+asserts the kept-sample count equals the super cohort (`super ⊆ merged`) before the aggregate is
+registered, so the released dataset cannot silently disagree with the cohort it registers against.
 
 ## Prerequisites
 Before running the pipeline, ensure you have the following tools installed and configured:
@@ -96,7 +94,7 @@ The pipeline is configured using a TOML file (e.g., `config.toml`). A template i
     - `egt_cluster_path`: Path to the Illumina EGT cluster file.
     - `af_ref_path` (optional): Path to a VCF containing population allele frequencies for `BafRegress`.
 - `[popgen_genotyping.merge_cohort_plink]`:
-    - `previous_aggregate_cohort_id` (optional): The Metamist **cohort ID** of a previous aggregate to roll forward. Omit for a from-scratch (bootstrap) build. Use `scripts/list_aggregates.py` to list registered aggregate cohorts and pick one. See [Rolling aggregate & two-phase run](#rolling-aggregate--two-phase-run). *(Deferred to PR 3b: the current code still selects the previous aggregate by analysis ID via `merge_cohort_plink.previous_analysis_id`; the cohort-ID switch lands with the phase-2 conversion.)*
+    - `previous_aggregate_cohort_id` (optional): The Metamist **cohort ID** of a previous aggregate to roll forward. Omit for a from-scratch (bootstrap) build. Use `scripts/list_aggregates.py` to list registered aggregate cohorts and pick one. See [Rolling aggregate & two-phase run](#rolling-aggregate--two-phase-run).
 
 ## Execution
 To run the pipeline, use the `analysis-runner` command. You will need to specify the path to your configuration file, the output directory, and the script to execute.
