@@ -105,13 +105,13 @@ def run_merge_plink(
     )
     if keep_samples:
         j.declare_resource_group(
-            merged_plink={
+            merged_untrimmed={
                 'bed': '{root}.bed',
                 'bim': '{root}.bim',
                 'fam': '{root}.fam',
             }
         )
-        merge_target = j.merged_plink
+        merge_target = j.merged_untrimmed
     else:
         merge_target = j.output_plink
 
