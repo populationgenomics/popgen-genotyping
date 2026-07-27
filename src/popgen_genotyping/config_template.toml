@@ -41,8 +41,9 @@ storage = '50G'
 cpu = 4
 memory = 'highmem'
 storage = '100G'
-# The Metamist analysis ID of the previous multi-cohort aggregate
-# previous_analysis_id = 123456
+# The Metamist cohort ID of the previous aggregate to roll forward (phase 2).
+# Omit for a from-scratch (bootstrap) build. Use scripts/list_aggregates.py to pick one.
+# previous_aggregate_cohort_id = 'COH123'
 
 [popgen_genotyping.export_cohort_datasets]
 cpu = 2
