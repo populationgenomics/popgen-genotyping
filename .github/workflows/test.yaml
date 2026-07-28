@@ -6,12 +6,20 @@ on:
         description: 'Tag of the image to test'
         type: string
         default: 'latest'
+      image_registry:
+        description: 'Artifact Registry repo (images or images-dev)'
+        type: string
+        default: 'images-dev'
   workflow_dispatch:
     inputs:
       image_tag:
         description: 'Tag of the image to test'
         type: string
         default: 'latest'
+      image_registry:
+        description: 'Artifact Registry repo (images or images-dev)'
+        type: string
+        default: 'images-dev'
 
 permissions:
   id-token: write
@@ -45,13 +53,13 @@ jobs:
         # Use provided tag if available, otherwise fallback to ref_name-latest
         IMAGE_TAG="${{ inputs.image_tag }}"
         if [[ "$IMAGE_TAG" == "latest" ]]; then
-          IMAGE_TAG="${{ github.ref_name }}-latest"
+          IMAGE_TAG="${{ github.ref_name }}"
+          IMAGE_TAG="${IMAGE_TAG//\//-}-latest"
         fi
 
-        # We assume the image is in the images-dev repository for testing
         docker run --rm \
           --shm-size=2gb \
           -v ${{ github.workspace }}:/workspace \
           -w /workspace \
-          australia-southeast1-docker.pkg.dev/cpg-common/images-dev/popgen_genotyping:$IMAGE_TAG \
+          australia-southeast1-docker.pkg.dev/cpg-common/${{ inputs.image_registry }}/popgen_genotyping:$IMAGE_TAG \
           pytest test
