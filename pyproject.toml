@@ -23,6 +23,8 @@ classifiers=[
 # TODO Audit these dependencies later, lifted from
 # Harper's temp_large_cohort_migration
 dependencies=[
+    # >=3.3.0 for non-interactive confirm_choice, so SubmitPhase2 can submit from a batch job
+    'analysis-runner>=3.3.0',
     'cpg-flow>=v1.0.1',
     'loguru',
     'pandas>=2.0',
@@ -44,8 +46,10 @@ test = [
 ]
 
 [project.scripts]
-# the workflow runner script - entrypoint for the pipeline
-run_workflow = 'popgen_genotyping.run_workflow:cli_main'
+# phase 1: per-plate stages, then super-cohort creation + phase-2 submission
+first_workflow = 'popgen_genotyping.first_workflow:cli_main'
+# phase 2: rolling merge, export and QC against the super cohort
+second_workflow = 'popgen_genotyping.second_workflow:cli_main'
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/popgen_genotyping"]
