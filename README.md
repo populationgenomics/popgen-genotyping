@@ -124,7 +124,7 @@ is submitted automatically):
 ```bash
 analysis-runner \
     --skip-repo-checkout \
-    --image australia-southeast1-docker.pkg.dev/cpg-common/images/popgen_genotyping:latest \
+    --image australia-southeast1-docker.pkg.dev/cpg-common/images/popgen_genotyping:0.1.0-28 \
     --dataset <your-dataset> \
     --access-level full \
     --output-dir <output-directory> \
@@ -134,7 +134,8 @@ analysis-runner \
 ```
 
 The image must match `workflow.driver_image` in the config — the `SubmitPhase2` job runs in
-it and re-submits with it. To run phase 2 manually against an existing super cohort, set
+it and re-submits with it. Pin an exact tag, never `:latest`: phase 2 resolves the image
+string at its own start, so a floating tag can run the two phases on different code. To run phase 2 manually against an existing super cohort, set
 `workflow.input_cohorts = [<super cohort ID>]` and substitute `second_workflow` above.
 
 ## Local Development & Testing

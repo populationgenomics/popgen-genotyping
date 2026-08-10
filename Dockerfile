@@ -1,7 +1,8 @@
 FROM australia-southeast1-docker.pkg.dev/cpg-common/images/cpg_flow:1.3.1
 
-ARG VERSION=0.1.0
-ENV VERSION=$VERSION
+# CI's get_version.py reads this line to derive the image tag (VERSION-<n>);
+# it must stay a literal semver, so the VERSION build-arg CI passes is unused.
+ENV VERSION=0.1.0
 
 # Set the working directory
 WORKDIR /app

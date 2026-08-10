@@ -18,8 +18,10 @@ status_reporter = 'metamist'
 
 # Must be this repo's own image: the SubmitPhase2 job runs in it and needs the
 # popgen_genotyping package plus analysis-runner >= 3.3.0, and it doubles as the image
-# the phase-2 run is submitted with (--skip-repo-checkout).
-driver_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/popgen_genotyping:latest'
+# the phase-2 run is submitted with (--skip-repo-checkout). Pin an exact tag, never
+# ':latest': phase 2 resolves this string at its own start, so a floating tag can run
+# the two phases on different code.
+driver_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/popgen_genotyping:0.1.0-28'
 bcftools_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/bcftools:1.23-1'
 plink_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/plink:1.9-20250819-PLINK-2.0-20260228-1'
 king_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/king:2.3.2-1'
