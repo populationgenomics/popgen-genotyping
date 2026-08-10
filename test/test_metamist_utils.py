@@ -8,6 +8,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from popgen_genotyping.metamist_utils import (
+    create_custom_cohort,
+    find_cohort_by_membership,
     format_merge_plan,
     parse_genotyping_manifest,
     query_cohorts_with_analyses,
@@ -16,6 +18,7 @@ from popgen_genotyping.metamist_utils import (
     resolve_cohort_bed_map,
     resolve_gtc_path,
     resolve_merge_inputs,
+    resolve_super_cohort_membership,
 )
 
 
@@ -431,3 +434,93 @@ def test_format_merge_plan_bootstrap():
     assert 'bootstrap' in text
     assert 'carried forward:       0 SGs' in text
     assert 'expected merged total: 2 SGs' in text
+
+
+def test_resolve_super_cohort_membership_rolling():
+    cohorts = [_cohort('COH_AGG', ['CPG1', 'CPG2', 'CPG3'])]
+
+    membership = resolve_super_cohort_membership(
+        plate_sg_ids=['CPG4', 'CPG5'],
+        previous_aggregate_cohort_id='COH_AGG',
+        cohorts=cohorts,
+    )
+
+    assert membership == ['CPG1', 'CPG2', 'CPG3', 'CPG4', 'CPG5']
+
+
+def test_resolve_super_cohort_membership_bootstrap():
+    membership = resolve_super_cohort_membership(
+        plate_sg_ids=['CPG2', 'CPG1'],
+        previous_aggregate_cohort_id=None,
+    )
+
+    assert membership == ['CPG1', 'CPG2']
+
+
+def test_resolve_super_cohort_membership_missing_aggregate_raises():
+    with pytest.raises(ValueError, match='COH_MISSING'):
+        resolve_super_cohort_membership(
+            plate_sg_ids=['CPG1'],
+            previous_aggregate_cohort_id='COH_MISSING',
+            cohorts=[_cohort('COH_OTHER', ['CPG9'])],
+        )
+
+
+def test_find_cohort_by_membership():
+    cohorts = [
+        _cohort('COH1', ['CPG1', 'CPG2']),
+        _cohort('COH2', ['CPG1', 'CPG2', 'CPG3']),
+    ]
+
+    match = find_cohort_by_membership(['CPG3', 'CPG2', 'CPG1'], cohorts=cohorts)
+
+    assert match is not None
+    assert match['id'] == 'COH2'
+
+
+def test_find_cohort_by_membership_no_match():
+    cohorts = [_cohort('COH1', ['CPG1', 'CPG2'])]
+
+    assert find_cohort_by_membership(['CPG1'], cohorts=cohorts) is None
+
+
+def test_find_cohort_by_membership_latest_wins():
+    cohorts = [
+        _cohort('COH1', ['CPG1', 'CPG2']),
+        _cohort('COH9', ['CPG1', 'CPG2']),
+    ]
+
+    match = find_cohort_by_membership(['CPG1', 'CPG2'], cohorts=cohorts)
+
+    assert match is not None
+    assert match['id'] == 'COH9'
+
+
+@patch('popgen_genotyping.metamist_utils.CohortApi')
+@patch('popgen_genotyping.metamist_utils.metamist_project')
+def test_create_custom_cohort(mock_project, mock_api):
+    mock_project.return_value = 'ourdna'
+    mock_api.return_value.create_cohort_from_criteria.return_value = {'cohort_id': 'COH42'}
+
+    cohort_id = create_custom_cohort(
+        name='array-aggregate-2026-08-10',
+        description='test cohort',
+        sg_ids=['CPG2', 'CPG1'],
+    )
+
+    assert cohort_id == 'COH42'
+    _, kwargs = mock_api.return_value.create_cohort_from_criteria.call_args
+    assert kwargs['project'] == 'ourdna'
+    body = kwargs['body_create_cohort_from_criteria']
+    assert body.cohort_criteria.sg_ids_internal == ['CPG1', 'CPG2']
+    assert body.cohort_spec.name == 'array-aggregate-2026-08-10'
+
+
+@patch('popgen_genotyping.metamist_utils.CohortApi')
+@patch('popgen_genotyping.metamist_utils.metamist_project')
+def test_create_custom_cohort_no_id_raises(mock_project, mock_api):
+    mock_project.return_value = 'ourdna'
+    mock_api.return_value.create_cohort_from_criteria.return_value = {}
+
+    with pytest.raises(ValueError, match='no cohort ID'):
+        create_custom_cohort(name='x', description='y', sg_ids=['CPG1'])
