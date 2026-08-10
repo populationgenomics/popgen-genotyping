@@ -1,6 +1,7 @@
 FROM australia-southeast1-docker.pkg.dev/cpg-common/images/cpg_flow:1.3.1
 
-ENV VERSION=0.1.0
+ARG VERSION=0.1.0
+ENV VERSION=$VERSION
 
 # Set the working directory
 WORKDIR /app
