@@ -29,7 +29,7 @@ from popgen_genotyping.metamist_utils import (
     resolve_cohort_gtc_mapping,
     resolve_merge_inputs,
 )
-from popgen_genotyping.utils import get_output_prefix
+from popgen_genotyping.utils import get_output_prefix, get_previous_aggregate_cohort_id
 
 if TYPE_CHECKING:
     from cpg_flow.stage import StageInput, StageOutput
@@ -212,9 +212,7 @@ class SubmitPhase2(MultiCohortStage):
         # Required: the name for the super cohort this run will create.
         super_cohort_name: str = config_retrieve(['popgen_genotyping', 'submit_phase2', 'super_cohort_name'])
         # Same key MergeCohortPlink reads in phase 2, so the two phases cannot drift.
-        previous_aggregate_cohort_id: str | None = config_retrieve(
-            ['popgen_genotyping', 'merge_cohort_plink', 'previous_aggregate_cohort_id'], default=None
-        )
+        previous_aggregate_cohort_id: str | None = get_previous_aggregate_cohort_id()
 
         j: PythonJob = run_submit_phase2(
             plate_sg_ids=multicohort.get_sequencing_group_ids(),
@@ -260,9 +258,7 @@ class MergeCohortPlink(CohortStage):
 
         # 1. Resolve the merge plan from Metamist. The super cohort is the source of truth;
         #    new plates are derived (NEW = super - previous aggregate), not listed in config.
-        previous_aggregate_cohort_id: str | None = config_retrieve(
-            ['popgen_genotyping', 'merge_cohort_plink', 'previous_aggregate_cohort_id'], default=None
-        )
+        previous_aggregate_cohort_id: str | None = get_previous_aggregate_cohort_id()
         super_cohort_sg_ids: list[str] = cohort.get_sequencing_group_ids()
         resolved: dict = resolve_merge_inputs(
             super_cohort_sg_ids=super_cohort_sg_ids,

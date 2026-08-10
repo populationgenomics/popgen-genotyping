@@ -47,6 +47,31 @@ def get_output_prefix(dataset: Dataset, stage_name: str, tmp: bool = False, vers
     return stage_prefix / str(version)
 
 
+def get_previous_aggregate_cohort_id() -> str | None:
+    """
+    Read the previous aggregate cohort ID from config, with bootstrap made explicit.
+
+    The key is required so a forgotten config entry cannot silently build a
+    new-plates-only aggregate: a from-scratch build must be declared with the literal
+    'bootstrap' (returns None); any other value must be a Metamist cohort ID.
+
+    Returns:
+        str | None: The cohort ID to roll forward, or None for a declared bootstrap.
+
+    Raises:
+        ConfigError: If the key is missing from config.
+        ValueError: If the value is neither a cohort ID (COH...) nor 'bootstrap'.
+    """
+    value: str = config_retrieve(['popgen_genotyping', 'merge_cohort_plink', 'previous_aggregate_cohort_id'])
+    if value == 'bootstrap':
+        return None
+    if not isinstance(value, str) or not value.startswith('COH'):
+        raise ValueError(
+            f"previous_aggregate_cohort_id must be a cohort ID (COH...) or the literal 'bootstrap', got {value!r}"
+        )
+    return value
+
+
 def get_sequencing_group_cohort(sequencing_group: SequencingGroup) -> Cohort:
     """
     Resolve the cohort a sequencing group belongs to by searching the multi-cohort.

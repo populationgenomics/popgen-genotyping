@@ -710,7 +710,8 @@ def create_custom_cohort(name: str, description: str, sg_ids: Iterable[str], pro
         str: The new cohort ID.
 
     Raises:
-        ValueError: If Metamist does not return a cohort ID.
+        ValueError: If Metamist excluded any requested SG as ineligible (the cohort
+            would be silently smaller than intended), or did not return a cohort ID.
     """
     project = metamist_project(project)
 
@@ -720,7 +721,18 @@ def create_custom_cohort(name: str, description: str, sg_ids: Iterable[str], pro
     )
     result = CohortApi().create_cohort_from_criteria(project=project, body_create_cohort_from_criteria=body)
 
-    cohort_id = result.get('cohort_id') if isinstance(result, dict) else getattr(result, 'cohort_id', None)
+    def _field(key: str) -> Any:
+        return result.get(key) if isinstance(result, dict) else getattr(result, key, None)
+
+    # Metamist drops ineligible SGs rather than failing; a cohort quietly smaller than
+    # requested would ship a short aggregate, so treat any exclusion as an error.
+    excluded = _field('excluded_ineligible_sg_ids_internal')
+    if excluded:
+        raise ValueError(
+            f'Metamist excluded {len(excluded)} ineligible sequencing group(s) from cohort {name!r}: {sorted(excluded)}'
+        )
+
+    cohort_id = _field('cohort_id')
     if not cohort_id:
         raise ValueError(f'Cohort creation for {name!r} returned no cohort ID: {result}')
     return str(cohort_id)

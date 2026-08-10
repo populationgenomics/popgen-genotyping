@@ -88,7 +88,7 @@ def create_super_cohort_and_submit(
         )
         logging.info(f'Created super cohort {cohort_id} ({super_cohort_name}) with {len(membership)} SGs')
 
-    # 2. Rewrite the run config for phase 2 and submit it.
+    # 2. Rewrite the run config for phase 2.
     config_dict = copy.deepcopy(dict(config._config))  # noqa: SLF001
     phase1_ar_guid = config_dict['workflow'].get('ar-guid')
     for key in NON_PORTABLE_WORKFLOW_KEYS:
@@ -97,6 +97,19 @@ def create_super_cohort_and_submit(
 
     with open('config.toml', 'w') as config_file:
         config_file.write(toml.dumps(config_dict))
+
+    # 3. Record the hand-off BEFORE submitting: a crash between submission and record
+    # would otherwise let a phase-1 re-run submit phase 2 twice, and two concurrent
+    # phase-2 runs race on the same outputs. The inverse failure (record written,
+    # submission failed) is recoverable: delete this sentinel and re-run phase 1.
+    record = {
+        'super_cohort_id': cohort_id,
+        'super_cohort_size': len(membership),
+        'previous_aggregate_cohort_id': previous_aggregate_cohort_id or '',
+        'phase1_ar_guid': phase1_ar_guid or '',
+    }
+    with to_path(output_path).open('w') as output_file:
+        output_file.write(toml.dumps(record))
 
     run_analysis_runner(
         dataset=config_dict['workflow']['dataset'],
@@ -108,16 +121,6 @@ def create_super_cohort_and_submit(
         config=['config.toml'],
         skip_repo_checkout=True,
     )
-
-    # 3. Record the submission so check_expected_outputs prevents a duplicate resubmit.
-    record = {
-        'super_cohort_id': cohort_id,
-        'super_cohort_size': len(membership),
-        'previous_aggregate_cohort_id': previous_aggregate_cohort_id or '',
-        'phase1_ar_guid': phase1_ar_guid or '',
-    }
-    with to_path(output_path).open('w') as output_file:
-        output_file.write(toml.dumps(record))
 
     return cohort_id
 

@@ -44,8 +44,10 @@ storage = '50G'
 cpu = 4
 memory = 'highmem'
 storage = '100G'
-# The Metamist cohort ID of the previous aggregate to roll forward (phase 2).
-# Omit for a from-scratch (bootstrap) build. Use scripts/list_aggregates.py to pick one.
+# Required: the Metamist cohort ID of the previous aggregate to roll forward, or the
+# literal 'bootstrap' to declare a from-scratch build. There is no default, so a
+# forgotten entry fails the run instead of silently building a new-plates-only
+# aggregate. Use scripts/list_aggregates.py to pick a cohort ID.
 # previous_aggregate_cohort_id = 'COH123'
 
 [popgen_genotyping.submit_phase2]

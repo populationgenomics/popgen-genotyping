@@ -524,3 +524,16 @@ def test_create_custom_cohort_no_id_raises(mock_project, mock_api):
 
     with pytest.raises(ValueError, match='no cohort ID'):
         create_custom_cohort(name='x', description='y', sg_ids=['CPG1'])
+
+
+@patch('popgen_genotyping.metamist_utils.CohortApi')
+@patch('popgen_genotyping.metamist_utils.metamist_project')
+def test_create_custom_cohort_excluded_sgs_raises(mock_project, mock_api):
+    mock_project.return_value = 'ourdna'
+    mock_api.return_value.create_cohort_from_criteria.return_value = {
+        'cohort_id': 'COH42',
+        'excluded_ineligible_sg_ids_internal': ['CPG9'],
+    }
+
+    with pytest.raises(ValueError, match=r'excluded 1 ineligible.*CPG9'):
+        create_custom_cohort(name='x', description='y', sg_ids=['CPG1', 'CPG9'])

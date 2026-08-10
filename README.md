@@ -57,6 +57,12 @@ To accumulate plates across several phase-1 runs before a single aggregation, se
 final one hands off to phase 2. Phase 2 can also be launched manually against a hand-made
 super cohort.
 
+The hand-off is guarded on both sides: cohort creation fails if Metamist excludes any
+requested SG as ineligible (rather than shipping a quietly smaller cohort), and the
+submission record is written *before* the phase-2 submission so a re-run of phase 1 can
+never submit phase 2 twice. If the submission itself fails, delete the `SubmitPhase2`
+sentinel TOML and re-run phase 1 — the created cohort is found by membership and reused.
+
 The previous aggregate is selected explicitly by **cohort ID** (`previous_aggregate_cohort_id`).
 The new plates are **not listed** in phase-2 config — they are **derived**
 (`NEW = super − previous aggregate`), and each new SG is resolved to its plate via the registered
@@ -107,7 +113,7 @@ The pipeline is configured using a TOML file (e.g., `config.toml`). A template i
     - `egt_cluster_path`: Path to the Illumina EGT cluster file.
     - `af_ref_path` (optional): Path to a VCF containing population allele frequencies for `BafRegress`.
 - `[popgen_genotyping.merge_cohort_plink]`:
-    - `previous_aggregate_cohort_id` (optional): The Metamist **cohort ID** of a previous aggregate to roll forward. Omit for a from-scratch (bootstrap) build. Used by `SubmitPhase2` (super-cohort membership) and `MergeCohortPlink` (carried aggregate), so the two phases cannot drift. Use `scripts/list_aggregates.py` to list registered aggregate cohorts and pick one. See [Rolling aggregate & two-phase run](#rolling-aggregate--two-phase-run).
+    - `previous_aggregate_cohort_id` (required): The Metamist **cohort ID** of a previous aggregate to roll forward, or the literal `'bootstrap'` to declare a from-scratch build. There is no default: a forgotten entry fails the run rather than silently building a new-plates-only aggregate. Used by `SubmitPhase2` (super-cohort membership) and `MergeCohortPlink` (carried aggregate), so the two phases cannot drift. Use `scripts/list_aggregates.py` to list registered aggregate cohorts and pick one. See [Rolling aggregate & two-phase run](#rolling-aggregate--two-phase-run).
 - `[popgen_genotyping.submit_phase2]`:
     - `super_cohort_name` (required for phase 1): Name for the super cohort `SubmitPhase2` creates. Must not collide with an existing cohort name; ignored when a cohort with identical membership already exists (it is reused).
 
