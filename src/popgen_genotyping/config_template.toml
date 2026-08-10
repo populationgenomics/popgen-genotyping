@@ -16,7 +16,10 @@ check_expected_outputs = true
 # the method to register outputs, can be missing - will not generate metamist analysis entries
 status_reporter = 'metamist'
 
-driver_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/cpg_flow:latest'
+# Must be this repo's own image: the SubmitPhase2 job runs in it and needs the
+# popgen_genotyping package plus analysis-runner >= 3.3.0, and it doubles as the image
+# the phase-2 run is submitted with (--skip-repo-checkout).
+driver_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/popgen_genotyping:latest'
 bcftools_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/bcftools:1.23-1'
 plink_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/plink:1.9-20250819-PLINK-2.0-20260228-1'
 king_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/king:2.3.2-1'
@@ -44,6 +47,13 @@ storage = '100G'
 # The Metamist cohort ID of the previous aggregate to roll forward (phase 2).
 # Omit for a from-scratch (bootstrap) build. Use scripts/list_aggregates.py to pick one.
 # previous_aggregate_cohort_id = 'COH123'
+
+[popgen_genotyping.submit_phase2]
+# Required for phase 1 (first_workflow): name for the super cohort the SubmitPhase2 stage
+# creates (previous aggregate SGs + this run's plate SGs). Must not collide with an
+# existing cohort name; if a cohort with identical membership already exists it is reused
+# and this name is ignored.
+# super_cohort_name = 'array-aggregate-2026-08-10'
 
 [popgen_genotyping.export_cohort_datasets]
 cpu = 2

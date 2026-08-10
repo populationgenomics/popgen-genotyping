@@ -6,18 +6,29 @@ graph TD
         L3[Conditional Job]:::conditional
     end
 
-    %% DAG Structure
-    GTC[Raw GTC Files]:::data --> GtoB[GtcToBcfs<br/><i>GTC to Heavy/Light BCF</i>]:::cohort
-    GtoB --> BAF[BafRegress<br/><i>Contamination Estimation</i>]:::cohort
-    GtoB --> BtoP[CohortBcfToPlink<br/><i>BCF to PLINK 1.9</i>]:::cohort
-    BtoP --> MCP[MergeCohortPlink<br/><i>Merge Samples + Rolling Aggregate</i>]:::multicohort
-    P2P1[Plink2ToPlink1<br/><i>PLINK2 to PLINK1.9 if needed</i>]:::conditional --> MCP
-    MCP --> ECD[ExportCohortDatasets<br/><i>Export to PLINK2/BCF</i>]:::multicohort
-    MCP --> KING[KingIbdseg<br/><i>KING --ibdseg Relatedness</i>]:::multicohort
-    ECD --> QC[Plink2Qc<br/><i>Per-sample QC</i>]:::multicohort
-    ECD --> SNP[SnpQcReport<br/><i>EGT + Call-Rate + HWE Filter</i>]:::multicohort
-    QC --> QR[QcReport<br/><i>Combined QC CSV</i>]:::multicohort
-    BAF --> QR
+    %% Phase 1: per plate cohort (first_workflow)
+    subgraph Phase1 [Phase 1 - first_workflow, per plate cohort]
+        GTC[Raw GTC Files]:::data --> GtoB[GtcToBcfs<br/><i>GTC to Heavy/Light BCF</i>]:::cohort
+        GtoB --> BAF[BafRegress<br/><i>Contamination Estimation</i>]:::cohort
+        GtoB --> BtoP[CohortBcfToPlink<br/><i>BCF to PLINK 1.9</i>]:::cohort
+        BAF --> SUB[SubmitPhase2<br/><i>Create Super Cohort + Submit Phase 2</i>]:::multicohort
+        BtoP --> SUB
+    end
+
+    %% Phase 2 runs as a separate analysis-runner submission against the super cohort;
+    %% MergeCohortPlink resolves its inputs from Metamist, not stage wiring.
+    SUB -. analysis-runner submission .-> MCP
+
+    subgraph Phase2 [Phase 2 - second_workflow, super cohort]
+        MCP[MergeCohortPlink<br/><i>Merge Plates + Rolling Aggregate</i>]:::cohort
+        P2P1[Plink2ToPlink1<br/><i>PLINK2 to PLINK1.9 if needed</i>]:::conditional --> MCP
+        MCP --> ECD[ExportCohortDatasets<br/><i>Export to PLINK2/BCF</i>]:::cohort
+        MCP --> KING[KingIbdseg<br/><i>KING --ibdseg Relatedness</i>]:::cohort
+        ECD --> QC[Plink2Qc<br/><i>Per-sample QC</i>]:::cohort
+        ECD --> SNP[SnpQcReport<br/><i>EGT + Call-Rate + HWE Filter</i>]:::cohort
+        QC --> QR[QcReport<br/><i>Combined QC CSV</i>]:::cohort
+        KING --> QR
+    end
 
     %% Component styling
     classDef cohort fill:#d1ecf1,stroke:#007bff,stroke-width:2px;
@@ -26,6 +37,6 @@ graph TD
     classDef data fill:#fff,stroke:#333,stroke-dasharray: 5 5;
 
     %% Explicit classes
-    class GtoB,BAF,BtoP cohort;
-    class MCP,ECD,QC,KING,QR,SNP multicohort;
+    class GtoB,BAF,BtoP,MCP,ECD,QC,KING,QR,SNP cohort;
+    class SUB multicohort;
     class P2P1 conditional;
