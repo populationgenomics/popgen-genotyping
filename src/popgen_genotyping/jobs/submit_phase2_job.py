@@ -19,8 +19,8 @@ if TYPE_CHECKING:
     from hailtop.batch.job import PythonJob
 
 # Run-specific workflow config keys that must not leak into the phase-2 submission:
-# ar-guid is unique per run, and any phase-1 stage selection would mask phase-2 stages.
-NON_PORTABLE_WORKFLOW_KEYS = ('ar-guid', 'first_stages', 'last_stages', 'only_stages', 'skip_stages')
+# the ar-guid is unique per run, and any phase-1 stage selection would mask phase-2 stages.
+NON_PORTABLE_WORKFLOW_KEYS = (config.AR_GUID_NAME, 'first_stages', 'last_stages', 'only_stages', 'skip_stages')
 
 
 def create_super_cohort_and_submit(
@@ -54,15 +54,18 @@ def create_super_cohort_and_submit(
         ValueError: If ``super_cohort_name`` is taken by a cohort with different membership.
     """
     import copy  # noqa: PLC0415
-    import logging  # noqa: PLC0415
 
     import requests  # noqa: PLC0415
     import toml  # noqa: PLC0415
     from analysis_runner.util import get_server_endpoint  # noqa: PLC0415
     from cpg_utils import to_path  # noqa: PLC0415
     from cpg_utils.cloud import get_google_identity_token  # noqa: PLC0415
+    from loguru import logger  # noqa: PLC0415
 
     from popgen_genotyping import metamist_utils  # noqa: PLC0415
+
+    config_dict = copy.deepcopy(dict(config.get_config()))
+    phase1_ar_guid = config_dict['workflow'].get(config.AR_GUID_NAME)
 
     # 0. Refuse to double-submit. The stage-level skip only gates a later run's DAG
     # construction, so a forced re-run (e.g. check_expected_outputs = false) or a
@@ -93,7 +96,7 @@ def create_super_cohort_and_submit(
     existing = metamist_utils.find_cohort_by_membership(membership, cohorts=cohorts)
     if existing:
         cohort_id = str(existing['id'])
-        logging.info(f'Reusing existing cohort {cohort_id} ({existing.get("name")}) with identical membership')
+        logger.info(f'Reusing existing cohort {cohort_id} ({existing.get("name")}) with identical membership')
     else:
         name_clash = next((c for c in cohorts if c.get('name') == super_cohort_name), None)
         if name_clash:
@@ -104,18 +107,16 @@ def create_super_cohort_and_submit(
         description = (
             f'popgen-genotyping aggregate: {len(membership)} SGs = '
             f'previous aggregate {previous_aggregate_cohort_id or "none (bootstrap)"} + '
-            f'{len(plate_sg_ids)} plate SGs (phase-1 ar-guid {config.config_retrieve(["workflow", "ar-guid"])})'
+            f'{len(plate_sg_ids)} plate SGs (phase-1 ar-guid {phase1_ar_guid or "unknown"})'
         )
         cohort_id = metamist_utils.create_custom_cohort(
             name=super_cohort_name,
             description=description,
             sg_ids=membership,
         )
-        logging.info(f'Created super cohort {cohort_id} ({super_cohort_name}) with {len(membership)} SGs')
+        logger.info(f'Created super cohort {cohort_id} ({super_cohort_name}) with {len(membership)} SGs')
 
     # 3. Rewrite the run config for phase 2.
-    config_dict = copy.deepcopy(dict(config._config))  # noqa: SLF001
-    phase1_ar_guid = config_dict['workflow'].get('ar-guid')
     for key in NON_PORTABLE_WORKFLOW_KEYS:
         config_dict['workflow'].pop(key, None)
     config_dict['workflow']['input_cohorts'] = [cohort_id]
@@ -141,7 +142,9 @@ def create_super_cohort_and_submit(
         server_endpoint,
         json={
             'dataset': config_dict['workflow']['dataset'],
-            'output': '',
+            # Phase 1's output prefix, so the analysis-runner audit record carries a
+            # meaningful output field (the forwarded config sets the same value anyway).
+            'output': config_dict['workflow']['output_prefix'],
             'accessLevel': config_dict['workflow']['access_level'],
             'script': ['second_workflow'],
             'description': f'popgen-genotyping phase 2: aggregate cohort {cohort_id}',
@@ -152,7 +155,7 @@ def create_super_cohort_and_submit(
         timeout=60,
     )
     response.raise_for_status()
-    logging.info(f'Phase-2 submission accepted: {response.text}')
+    logger.info(f'Phase-2 submission accepted: {response.text}')
 
     return cohort_id
 
