@@ -698,7 +698,8 @@ def resolve_super_cohort_membership(
         list[str]: Sorted super-cohort SG IDs.
 
     Raises:
-        ValueError: If the previous aggregate cohort is not found in the project.
+        ValueError: If the previous aggregate cohort is not found in the project, or if
+            every plate SG is already a member of it (nothing new to aggregate).
     """
     sg_ids: set[str] = set(plate_sg_ids)
 
@@ -708,7 +709,15 @@ def resolve_super_cohort_membership(
         agg_cohort = next((c for c in cohorts if c.get('id') == previous_aggregate_cohort_id), None)
         if agg_cohort is None:
             raise ValueError(f'Previous aggregate cohort {previous_aggregate_cohort_id} not found in project')
-        sg_ids |= {sg['id'] for sg in (agg_cohort.get('sequencingGroups') or []) if sg.get('id')}
+        agg_sg_ids = {sg['id'] for sg in (agg_cohort.get('sequencingGroups') or []) if sg.get('id')}
+        # A super cohort identical to the previous aggregate would send phase 2 chasing
+        # an empty new-SG set; fail here with the real reason instead.
+        if sg_ids <= agg_sg_ids:
+            raise ValueError(
+                f'All {len(sg_ids)} plate SGs are already members of previous aggregate cohort '
+                f'{previous_aggregate_cohort_id}; nothing new to aggregate'
+            )
+        sg_ids |= agg_sg_ids
 
     return sorted(sg_ids)
 

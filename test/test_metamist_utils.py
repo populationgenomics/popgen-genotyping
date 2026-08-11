@@ -459,6 +459,17 @@ def test_resolve_super_cohort_membership_bootstrap():
     assert membership == ['CPG1', 'CPG2']
 
 
+def test_resolve_super_cohort_membership_nothing_new_raises():
+    cohorts = [_cohort('COH_AGG', ['CPG1', 'CPG2', 'CPG3'])]
+
+    with pytest.raises(ValueError, match='nothing new to aggregate'):
+        resolve_super_cohort_membership(
+            plate_sg_ids=['CPG1', 'CPG2'],
+            previous_aggregate_cohort_id='COH_AGG',
+            cohorts=cohorts,
+        )
+
+
 def test_resolve_super_cohort_membership_missing_aggregate_raises():
     with pytest.raises(ValueError, match='COH_MISSING'):
         resolve_super_cohort_membership(
