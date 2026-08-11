@@ -6,6 +6,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from metamist.model.new_cohort import NewCohort
 
 from popgen_genotyping.metamist_utils import (
     create_custom_cohort,
@@ -500,7 +501,11 @@ def test_find_cohort_by_membership_latest_wins():
 @patch('popgen_genotyping.metamist_utils.metamist_project')
 def test_create_custom_cohort(mock_project, mock_api):
     mock_project.return_value = 'ourdna'
-    mock_api.return_value.create_cohort_from_criteria.return_value = {'cohort_id': 'COH42'}
+    mock_api.return_value.create_cohort_from_criteria.return_value = NewCohort(
+        cohort_id='COH42',
+        sequencing_group_ids=['CPG1', 'CPG2'],
+        dry_run=False,
+    )
 
     cohort_id = create_custom_cohort(
         name='array-aggregate-2026-08-10',
@@ -513,6 +518,8 @@ def test_create_custom_cohort(mock_project, mock_api):
     assert kwargs['project'] == 'ourdna'
     body = kwargs['body_create_cohort_from_criteria']
     assert body.cohort_criteria.sg_ids_internal == ['CPG1', 'CPG2']
+    # The server rejects an SG list combined with any other criterion (SET-839).
+    assert getattr(body.cohort_criteria, 'projects', None) in (None, [])
     assert body.cohort_spec.name == 'array-aggregate-2026-08-10'
 
 
@@ -520,6 +527,8 @@ def test_create_custom_cohort(mock_project, mock_api):
 @patch('popgen_genotyping.metamist_utils.metamist_project')
 def test_create_custom_cohort_no_id_raises(mock_project, mock_api):
     mock_project.return_value = 'ourdna'
+    # A malformed response without a cohort ID cannot be expressed as a NewCohort
+    # (cohort_id is required there), so a bare dict stands in for it.
     mock_api.return_value.create_cohort_from_criteria.return_value = {}
 
     with pytest.raises(ValueError, match='no cohort ID'):
@@ -528,12 +537,13 @@ def test_create_custom_cohort_no_id_raises(mock_project, mock_api):
 
 @patch('popgen_genotyping.metamist_utils.CohortApi')
 @patch('popgen_genotyping.metamist_utils.metamist_project')
-def test_create_custom_cohort_excluded_sgs_raises(mock_project, mock_api):
+def test_create_custom_cohort_missing_sgs_raises(mock_project, mock_api):
     mock_project.return_value = 'ourdna'
-    mock_api.return_value.create_cohort_from_criteria.return_value = {
-        'cohort_id': 'COH42',
-        'excluded_ineligible_sg_ids_internal': ['CPG9'],
-    }
+    mock_api.return_value.create_cohort_from_criteria.return_value = NewCohort(
+        cohort_id='COH42',
+        sequencing_group_ids=['CPG1'],
+        dry_run=False,
+    )
 
-    with pytest.raises(ValueError, match=r'excluded 1 ineligible.*CPG9'):
+    with pytest.raises(ValueError, match=r'missing 1 requested sequencing group.*CPG9'):
         create_custom_cohort(name='x', description='y', sg_ids=['CPG1', 'CPG9'])

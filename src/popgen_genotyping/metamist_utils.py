@@ -710,29 +710,34 @@ def create_custom_cohort(name: str, description: str, sg_ids: Iterable[str], pro
         str: The new cohort ID.
 
     Raises:
-        ValueError: If Metamist excluded any requested SG as ineligible (the cohort
-            would be silently smaller than intended), or did not return a cohort ID.
+        ValueError: If the created cohort is missing any requested SG (the cohort would
+            be silently smaller than intended), or Metamist did not return a cohort ID.
     """
     project = metamist_project(project)
 
+    requested = sorted(sg_ids)
     body = BodyCreateCohortFromCriteria(
         cohort_spec=CohortBody(name=name, description=description),
-        cohort_criteria=CohortCriteria(projects=[project], sg_ids_internal=sorted(sg_ids)),
+        # sg_ids_internal must be the sole criterion: the server rejects an explicit SG
+        # list combined with any other criterion, including projects (metamist SET-839).
+        cohort_criteria=CohortCriteria(sg_ids_internal=requested),
     )
     result = CohortApi().create_cohort_from_criteria(project=project, body_create_cohort_from_criteria=body)
 
     def _field(key: str) -> Any:
         return result.get(key) if isinstance(result, dict) else getattr(result, key, None)
 
-    # Metamist drops ineligible SGs rather than failing; a cohort quietly smaller than
-    # requested would ship a short aggregate, so treat any exclusion as an error.
-    excluded = _field('excluded_ineligible_sg_ids_internal')
-    if excluded:
-        raise ValueError(
-            f'Metamist excluded {len(excluded)} ineligible sequencing group(s) from cohort {name!r}: {sorted(excluded)}'
-        )
-
     cohort_id = _field('cohort_id')
     if not cohort_id:
         raise ValueError(f'Cohort creation for {name!r} returned no cohort ID: {result}')
+
+    # Current Metamist raises on inactive SGs, but a cohort whose membership differs
+    # from the request would ship a wrong aggregate, so verify the created membership
+    # regardless of server version.
+    created = set(_field('sequencing_group_ids') or [])
+    missing = sorted(set(requested) - created)
+    if missing:
+        raise ValueError(
+            f'Cohort {name!r} ({cohort_id}) is missing {len(missing)} requested sequencing group(s): {missing}'
+        )
     return str(cohort_id)

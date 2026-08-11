@@ -57,8 +57,8 @@ To accumulate plates across several phase-1 runs before a single aggregation, se
 final one hands off to phase 2. Phase 2 can also be launched manually against a hand-made
 super cohort.
 
-The hand-off is guarded on both sides: cohort creation fails if Metamist excludes any
-requested SG as ineligible (rather than shipping a quietly smaller cohort), and the
+The hand-off is guarded on both sides: cohort creation fails if the created cohort is
+missing any requested SG (rather than shipping a quietly smaller cohort), and the
 submission record is written *before* the phase-2 submission so a re-run of phase 1 can
 never submit phase 2 twice. If the submission itself fails, delete the `SubmitPhase2`
 sentinel TOML and re-run phase 1 — the created cohort is found by membership and reused.
