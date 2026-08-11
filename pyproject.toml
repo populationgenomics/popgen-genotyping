@@ -29,6 +29,10 @@ dependencies=[
     'loguru',
     'pandas>=2.0',
     'pydantic>=2.12',
+    # used directly by the SubmitPhase2 job; declared so they cannot vanish with a
+    # transitive-dependency change
+    'requests',
+    'toml',
 ]
 
 [project.urls]
