@@ -61,6 +61,16 @@ def create_super_cohort_and_submit(
 
     from popgen_genotyping import metamist_utils  # noqa: PLC0415
 
+    # 0. Refuse to double-submit. The stage-level skip only gates a later run's DAG
+    # construction, so a forced re-run (e.g. check_expected_outputs = false) or a
+    # rescheduled attempt of this job would otherwise launch a second phase-2 driver
+    # racing the first on the same outputs.
+    if to_path(output_path).exists():
+        raise ValueError(
+            f'Phase-2 submission record already exists at {output_path}; refusing to submit again. '
+            f'If the recorded submission actually failed, delete the sentinel and re-run phase 1.'
+        )
+
     # 1. Resolve the target membership and check for an existing identical cohort.
     cohorts = metamist_utils.query_cohorts_with_analyses()
     membership = metamist_utils.resolve_super_cohort_membership(
@@ -159,6 +169,10 @@ def run_submit_phase2(
     batch = hail_batch.get_batch()
     j: PythonJob = batch.new_python_job(job_name)
     j.image(config.config_retrieve(['workflow', 'driver_image']))
+    # Not exactly-once on spot: a preemption between the submission POST and job
+    # completion would rerun the function (and trip the sentinel check as a red job
+    # even though phase 2 was submitted), so keep this job off spot instances.
+    j.spot(is_spot=False)
     j.call(
         create_super_cohort_and_submit,
         plate_sg_ids,
