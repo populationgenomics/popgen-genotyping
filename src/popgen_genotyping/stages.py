@@ -188,8 +188,10 @@ class SubmitPhase2(MultiCohortStage):
     """
     Create the super cohort in Metamist and submit the phase-2 workflow.
 
-    Final phase-1 stage: runs once, after every plate cohort in the run has registered its
-    durable ``array_bafregress`` and ``array_cohort_bed`` outputs. The batch job computes the
+    Final phase-1 stage: runs once, after the plate cohorts' compute jobs. cpg-flow's
+    Metamist registration jobs are not stage dependencies, so the batch job first waits
+    for every plate cohort's ``array_bafregress`` and ``array_cohort_bed`` analyses to be
+    registered (phase 2 resolves them at driver startup). It then computes the
     super-cohort membership (previous aggregate cohort SGs, if configured, union this run's
     plate SGs), creates the cohort — reusing an existing cohort with identical membership —
     and submits ``second_workflow`` against it via analysis-runner. The sentinel output
@@ -216,6 +218,7 @@ class SubmitPhase2(MultiCohortStage):
 
         j: PythonJob = run_submit_phase2(
             plate_sg_ids=multicohort.get_sequencing_group_ids(),
+            plate_cohort_ids=[cohort.id for cohort in multicohort.get_cohorts()],
             previous_aggregate_cohort_id=previous_aggregate_cohort_id,
             super_cohort_name=super_cohort_name,
             output_path=str(outputs),

@@ -20,6 +20,7 @@ from popgen_genotyping.metamist_utils import (
     resolve_gtc_path,
     resolve_merge_inputs,
     resolve_super_cohort_membership,
+    wait_for_cohort_analyses,
 )
 
 
@@ -547,3 +548,42 @@ def test_create_custom_cohort_missing_sgs_raises(mock_project, mock_api):
 
     with pytest.raises(ValueError, match=r'missing 1 requested sequencing group.*CPG9'):
         create_custom_cohort(name='x', description='y', sg_ids=['CPG1', 'CPG9'])
+
+
+@patch('popgen_genotyping.metamist_utils.time')
+@patch('popgen_genotyping.metamist_utils.query_cohorts_with_analyses')
+def test_wait_for_cohort_analyses_returns_when_registered(mock_query, mock_time):
+    mock_time.monotonic.return_value = 0
+    mock_query.return_value = [
+        _cohort('COH1', ['CPG1'], analyses=[_analysis('array_cohort_bed', 'x'), _analysis('array_bafregress', 'y')]),
+    ]
+
+    wait_for_cohort_analyses(cohort_ids=['COH1'], analysis_types=['array_cohort_bed', 'array_bafregress'])
+
+    mock_time.sleep.assert_not_called()
+
+
+@patch('popgen_genotyping.metamist_utils.time')
+@patch('popgen_genotyping.metamist_utils.query_cohorts_with_analyses')
+def test_wait_for_cohort_analyses_polls_until_registered(mock_query, mock_time):
+    mock_time.monotonic.side_effect = [0, 10]
+    mock_query.side_effect = [
+        [_cohort('COH1', ['CPG1'], analyses=[_analysis('array_cohort_bed', 'x')])],
+        [_cohort('COH1', ['CPG1'], analyses=[_analysis('array_cohort_bed', 'x'), _analysis('array_bafregress', 'y')])],
+    ]
+
+    wait_for_cohort_analyses(cohort_ids=['COH1'], analysis_types=['array_cohort_bed', 'array_bafregress'])
+
+    mock_time.sleep.assert_called_once()
+
+
+@patch('popgen_genotyping.metamist_utils.time')
+@patch('popgen_genotyping.metamist_utils.query_cohorts_with_analyses')
+def test_wait_for_cohort_analyses_times_out(mock_query, mock_time):
+    mock_time.monotonic.side_effect = [0, 1000]
+    mock_query.return_value = [_cohort('COH1', ['CPG1'], analyses=[_analysis('array_cohort_bed', 'x')])]
+
+    with pytest.raises(TimeoutError, match=r'COH1.*array_bafregress'):
+        wait_for_cohort_analyses(cohort_ids=['COH1'], analysis_types=['array_cohort_bed', 'array_bafregress'])
+
+    mock_time.sleep.assert_not_called()

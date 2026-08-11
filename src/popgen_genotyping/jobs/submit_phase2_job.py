@@ -25,6 +25,7 @@ NON_PORTABLE_WORKFLOW_KEYS = ('ar-guid', 'first_stages', 'last_stages', 'only_st
 
 def create_super_cohort_and_submit(
     plate_sg_ids: list[str],
+    plate_cohort_ids: list[str],
     previous_aggregate_cohort_id: str | None,
     super_cohort_name: str,
     output_path: str,
@@ -39,6 +40,8 @@ def create_super_cohort_and_submit(
 
     Args:
         plate_sg_ids (list[str]): SGs of the phase-1 plate cohorts.
+        plate_cohort_ids (list[str]): The phase-1 plate cohort IDs, whose durable outputs
+            must be registered in Metamist before phase 2 is submitted.
         previous_aggregate_cohort_id (str, optional): Cohort ID of the previous aggregate,
             or None for a from-scratch (bootstrap) build.
         super_cohort_name (str): Name for the new super cohort.
@@ -71,7 +74,15 @@ def create_super_cohort_and_submit(
             f'If the recorded submission actually failed, delete the sentinel and re-run phase 1.'
         )
 
-    # 1. Resolve the target membership and check for an existing identical cohort.
+    # 1. Wait until every plate cohort has registered its durable outputs: cpg-flow's
+    # registration jobs are not dependencies of this job (see wait_for_cohort_analyses),
+    # and phase 2 resolves those analyses at driver startup.
+    metamist_utils.wait_for_cohort_analyses(
+        cohort_ids=plate_cohort_ids,
+        analysis_types=('array_cohort_bed', 'array_bafregress'),
+    )
+
+    # 2. Resolve the target membership and check for an existing identical cohort.
     cohorts = metamist_utils.query_cohorts_with_analyses()
     membership = metamist_utils.resolve_super_cohort_membership(
         plate_sg_ids=plate_sg_ids,
@@ -102,14 +113,14 @@ def create_super_cohort_and_submit(
         )
         logging.info(f'Created super cohort {cohort_id} ({super_cohort_name}) with {len(membership)} SGs')
 
-    # 2. Rewrite the run config for phase 2.
+    # 3. Rewrite the run config for phase 2.
     config_dict = copy.deepcopy(dict(config._config))  # noqa: SLF001
     phase1_ar_guid = config_dict['workflow'].get('ar-guid')
     for key in NON_PORTABLE_WORKFLOW_KEYS:
         config_dict['workflow'].pop(key, None)
     config_dict['workflow']['input_cohorts'] = [cohort_id]
 
-    # 3. Record the hand-off BEFORE submitting: a crash between submission and record
+    # 4. Record the hand-off BEFORE submitting: a crash between submission and record
     # would otherwise let a phase-1 re-run submit phase 2 twice, and two concurrent
     # phase-2 runs race on the same outputs. The inverse failure (record written,
     # submission failed) is recoverable: delete this sentinel and re-run phase 1.
@@ -148,6 +159,7 @@ def create_super_cohort_and_submit(
 
 def run_submit_phase2(
     plate_sg_ids: list[str],
+    plate_cohort_ids: list[str],
     previous_aggregate_cohort_id: str | None,
     super_cohort_name: str,
     output_path: str,
@@ -158,6 +170,7 @@ def run_submit_phase2(
 
     Args:
         plate_sg_ids (list[str]): SGs of the phase-1 plate cohorts.
+        plate_cohort_ids (list[str]): The phase-1 plate cohort IDs.
         previous_aggregate_cohort_id (str, optional): Cohort ID of the previous aggregate.
         super_cohort_name (str): Name for the new super cohort.
         output_path (str): Cloud path for the submission-record sentinel TOML.
@@ -176,6 +189,7 @@ def run_submit_phase2(
     j.call(
         create_super_cohort_and_submit,
         plate_sg_ids,
+        plate_cohort_ids,
         previous_aggregate_cohort_id,
         super_cohort_name,
         output_path,

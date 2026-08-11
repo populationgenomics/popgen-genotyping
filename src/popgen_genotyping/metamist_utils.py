@@ -4,10 +4,12 @@ Metamist GraphQL query utilities for the genotyping pipeline.
 
 import csv
 import functools
+import time
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 
 from cpg_utils import to_path
+from loguru import logger
 from cpg_utils.config import config_retrieve
 from metamist.apis import CohortApi
 from metamist.graphql import gql, query
@@ -340,6 +342,52 @@ def query_cohorts_with_analyses(project: str | None = None) -> list[dict[str, An
 
     project_result = query_result.get('project') or {}
     return project_result.get('cohorts') or []
+
+
+def wait_for_cohort_analyses(
+    cohort_ids: Iterable[str],
+    analysis_types: Iterable[str],
+    project: str | None = None,
+    timeout_seconds: float = 900,
+    poll_seconds: float = 30,
+) -> None:
+    """
+    Block until every cohort has a registered analysis of every requested type.
+
+    cpg-flow's Metamist registration jobs are not stage dependencies (the status
+    reporter creates them but never adds them to the stage's output jobs), so a job
+    that consumes registered analyses can start while registration is still in flight.
+    Polling closes that race; the deadline keeps a genuinely failed registration loud.
+
+    Args:
+        cohort_ids (Iterable[str]): Cohorts whose analyses must exist.
+        analysis_types (Iterable[str]): Analysis types required on every cohort.
+        project (str, optional): Metamist project name. Defaults to the 'dataset' from config.
+        timeout_seconds (float): Deadline before giving up. Defaults to 900.
+        poll_seconds (float): Delay between Metamist queries. Defaults to 30.
+
+    Raises:
+        TimeoutError: If any (cohort, analysis type) pair is still unregistered at the deadline.
+    """
+    ids = list(cohort_ids)
+    types = list(analysis_types)
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        by_id = {c.get('id'): c for c in query_cohorts_with_analyses(project)}
+        missing = [
+            (cohort_id, analysis_type)
+            for cohort_id in ids
+            for analysis_type in types
+            if not any(a.get('type') == analysis_type for a in ((by_id.get(cohort_id) or {}).get('analyses') or []))
+        ]
+        if not missing:
+            return
+        if time.monotonic() >= deadline:
+            raise TimeoutError(
+                f'Timed out after {timeout_seconds}s waiting for Metamist analysis registration: {missing}'
+            )
+        logger.info(f'Waiting for {len(missing)} Metamist analysis registration(s): {missing}')
+        time.sleep(poll_seconds)
 
 
 def _invert_cohort_analyses(cohorts: list[dict[str, Any]], analysis_type: str) -> dict[str, dict[str, str]]:
