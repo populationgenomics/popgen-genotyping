@@ -487,15 +487,18 @@ def test_find_cohort_by_membership_no_match():
 
 
 def test_find_cohort_by_membership_latest_wins():
+    # COH99 vs COH100 crosses a digit-length boundary, where lexicographic
+    # comparison would wrongly pick COH99.
     cohorts = [
-        _cohort('COH1', ['CPG1', 'CPG2']),
+        _cohort('COH100', ['CPG1', 'CPG2']),
+        _cohort('COH99', ['CPG1', 'CPG2']),
         _cohort('COH9', ['CPG1', 'CPG2']),
     ]
 
     match = find_cohort_by_membership(['CPG1', 'CPG2'], cohorts=cohorts)
 
     assert match is not None
-    assert match['id'] == 'COH9'
+    assert match['id'] == 'COH100'
 
 
 @patch('popgen_genotyping.metamist_utils.CohortApi')

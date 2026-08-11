@@ -741,7 +741,9 @@ def find_cohort_by_membership(
     matches = [c for c in cohorts if {sg['id'] for sg in (c.get('sequencingGroups') or []) if sg.get('id')} == target]
     if not matches:
         return None
-    return max(matches, key=lambda c: c.get('id', ''))
+    # Cohort IDs are 'COH' + an unpadded integer (+ check digit), so 'latest' must
+    # compare numerically: lexicographic max would rank COH99 above COH100.
+    return max(matches, key=lambda c: int(str(c.get('id', '')).removeprefix('COH')))
 
 
 def create_custom_cohort(name: str, description: str, sg_ids: Iterable[str], project: str | None = None) -> str:
