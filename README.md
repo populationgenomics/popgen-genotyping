@@ -60,8 +60,11 @@ super cohort.
 The hand-off is guarded on both sides: cohort creation fails if the created cohort is
 missing any requested SG (rather than shipping a quietly smaller cohort), and the
 submission record is written *before* the phase-2 submission so a re-run of phase 1 can
-never submit phase 2 twice. If the submission itself fails, delete the `SubmitPhase2`
-sentinel TOML and re-run phase 1 — the created cohort is found by membership and reused.
+never submit phase 2 twice (the job also refuses at runtime if the record already exists).
+If the submission itself fails, delete the sentinel TOML at
+`<dataset prefix>/popgen_genotyping/SubmitPhase2/<workflow.version>/<multicohort-name>_phase2_submitted.toml`
+and re-run phase 1 — the created cohort is found by membership and reused. Keep
+`check_expected_outputs = true`: the existing sentinel is what skips the stage on re-run.
 
 The previous aggregate is selected explicitly by **cohort ID** (`previous_aggregate_cohort_id`).
 The new plates are **not listed** in phase-2 config — they are **derived**
@@ -133,9 +136,18 @@ analysis-runner \
     first_workflow
 ```
 
-The image must match `workflow.driver_image` in the config — the `SubmitPhase2` job runs in
-it and re-submits with it. Pin an exact tag, never `:latest`: phase 2 resolves the image
-string at its own start, so a floating tag can run the two phases on different code. To run phase 2 manually against an existing super cohort, set
+The image must match `workflow.driver_image` in the config; nothing validates this, so be
+precise about which value governs what: the phase-1 driver runs in the CLI `--image`, while
+the `SubmitPhase2` job and the whole of phase 2 use `workflow.driver_image` from the config —
+if they drift, the two phases run different code. Pin an exact tag, never `:latest`: phase 2
+resolves the image string at its own start, so a floating tag can also run the two phases on
+different code. CI builds a new `<VERSION>-<n>` tag on every merge to main; list them with:
+
+```bash
+gcloud artifacts docker tags list australia-southeast1-docker.pkg.dev/cpg-common/images/popgen_genotyping
+```
+
+To run phase 2 manually against an existing super cohort, set
 `workflow.input_cohorts = [<super cohort ID>]` and substitute `second_workflow` above.
 
 ## Local Development & Testing
