@@ -46,8 +46,8 @@ built — so the pipeline runs as two chained analysis-runner runs with separate
    creates the super cohort (previous aggregate SGs ∪ this run's plate SGs, reusing an
    existing cohort with identical membership rather than duplicating it) and submits phase 2
    against it. The hand-off works because the cohort is created at batch runtime, before the
-   phase-2 driver builds its DAG. Submission from a job requires **analysis-runner >= 3.3.0**,
-   which auto-confirms the full-access prompt when stdin is not a TTY.
+   phase-2 driver builds its DAG. The job POSTs to the analysis-runner server directly and
+   fails loudly on any HTTP error (the `run_analysis_runner` helper swallows them).
 2. **Phase 2 (`second_workflow`)** — runs against the **super cohort**
    (`input_cohorts=[super]`, set automatically by `SubmitPhase2`). Rolls the previous
    aggregate forward and merges only the new plates.

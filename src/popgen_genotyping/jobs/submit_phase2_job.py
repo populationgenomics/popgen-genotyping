@@ -5,8 +5,10 @@ Phase 2 must run against a cohort that does not exist when phase 1 builds its DA
 (cpg-flow cannot create or validate a cohort mid-run). This job sidesteps that by doing
 both steps at batch runtime, after every plate cohort has registered its outputs: it
 creates the super cohort, then submits a fresh analysis-runner run whose driver sees the
-cohort already existing. Submission from a batch job requires analysis-runner >= 3.3.0,
-which auto-confirms the full-access prompt when stdin is not a TTY.
+cohort already existing. The submission POSTs to the analysis-runner server directly
+rather than going through ``run_analysis_runner``: that helper prompts interactively for
+full access and, worse, catches HTTP errors and returns normally, which would leave this
+job green with phase 2 never submitted.
 """
 
 from typing import TYPE_CHECKING
@@ -51,9 +53,11 @@ def create_super_cohort_and_submit(
     import copy  # noqa: PLC0415
     import logging  # noqa: PLC0415
 
+    import requests  # noqa: PLC0415
     import toml  # noqa: PLC0415
-    from analysis_runner.cli_analysisrunner import run_analysis_runner  # noqa: PLC0415
+    from analysis_runner.util import get_server_endpoint  # noqa: PLC0415
     from cpg_utils import to_path  # noqa: PLC0415
+    from cpg_utils.cloud import get_google_identity_token  # noqa: PLC0415
 
     from popgen_genotyping import metamist_utils  # noqa: PLC0415
 
@@ -95,9 +99,6 @@ def create_super_cohort_and_submit(
         config_dict['workflow'].pop(key, None)
     config_dict['workflow']['input_cohorts'] = [cohort_id]
 
-    with open('config.toml', 'w') as config_file:
-        config_file.write(toml.dumps(config_dict))
-
     # 3. Record the hand-off BEFORE submitting: a crash between submission and record
     # would otherwise let a phase-1 re-run submit phase 2 twice, and two concurrent
     # phase-2 runs race on the same outputs. The inverse failure (record written,
@@ -111,16 +112,26 @@ def create_super_cohort_and_submit(
     with to_path(output_path).open('w') as output_file:
         output_file.write(toml.dumps(record))
 
-    run_analysis_runner(
-        dataset=config_dict['workflow']['dataset'],
-        image=config_dict['workflow']['driver_image'],
-        output_dir='',
-        script=['second_workflow'],
-        description=f'popgen-genotyping phase 2: aggregate cohort {cohort_id}',
-        access_level=config_dict['workflow']['access_level'],
-        config=['config.toml'],
-        skip_repo_checkout=True,
+    # POST to the analysis-runner server directly and raise on any HTTP error; see the
+    # module docstring for why run_analysis_runner is not used. No repo/commit fields
+    # means no repo checkout: the driver image alone carries the code.
+    server_endpoint = get_server_endpoint()
+    response = requests.post(
+        server_endpoint,
+        json={
+            'dataset': config_dict['workflow']['dataset'],
+            'output': '',
+            'accessLevel': config_dict['workflow']['access_level'],
+            'script': ['second_workflow'],
+            'description': f'popgen-genotyping phase 2: aggregate cohort {cohort_id}',
+            'image': config_dict['workflow']['driver_image'],
+            'config': config_dict,
+        },
+        headers={'Authorization': f'Bearer {get_google_identity_token(server_endpoint)}'},
+        timeout=60,
     )
+    response.raise_for_status()
+    logging.info(f'Phase-2 submission accepted: {response.text}')
 
     return cohort_id
 

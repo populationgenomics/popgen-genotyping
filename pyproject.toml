@@ -23,7 +23,7 @@ classifiers=[
 # TODO Audit these dependencies later, lifted from
 # Harper's temp_large_cohort_migration
 dependencies=[
-    # >=3.3.0 for non-interactive confirm_choice, so SubmitPhase2 can submit from a batch job
+    # SubmitPhase2 submits phase 2 by POSTing to the server endpoint from analysis_runner.util
     'analysis-runner>=3.3.0',
     'cpg-flow>=v1.0.1',
     'loguru',
