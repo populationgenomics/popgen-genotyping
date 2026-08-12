@@ -582,19 +582,22 @@ def format_merge_plan(resolved: dict[str, Any], previous_aggregate_cohort_id: st
     Render a human-readable summary of a resolved rolling-merge plan for the driver log.
 
     Lets an operator confirm at a glance that phase 2 picked up the phase-1 plates: it
-    lists each contributing plate cohort with its new-SG count, and prints an expected
-    merged total that should equal the super cohort size.
+    lists each contributing plate cohort with its new-SG count. The printed totals are
+    all derived from the super cohort's membership, so they are informational, not a
+    cross-check — the expected merged total equals the super cohort size by construction.
+    The check that the merged data actually matches is the in-job kept-sample-count
+    assert after the final ``--keep``.
 
     Args:
         resolved (dict[str, Any]): The dict returned by :func:`resolve_merge_inputs`.
         previous_aggregate_cohort_id (str, optional): Cohort ID rolled forward, for the header.
 
     Returns:
-        str: A multi-line summary suitable for ``logging.info``.
+        str: A multi-line summary suitable for ``logger.info``.
     """
-    plate_merge_list: list[dict[str, Any]] = resolved.get('plate_merge_list', [])
-    samples_to_remove: list[str] = resolved.get('samples_to_remove', [])
-    super_size: int = resolved.get('super_cohort_size', 0)
+    plate_merge_list: list[dict[str, Any]] = resolved['plate_merge_list']
+    samples_to_remove: list[str] = resolved['samples_to_remove']
+    super_size: int = resolved['super_cohort_size']
 
     new_count: int = sum(p['new_count'] for p in plate_merge_list)
     carried_forward: int = super_size - new_count
