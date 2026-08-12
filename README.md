@@ -38,11 +38,19 @@ Aggregate datasets are registered against a **super cohort** (previous aggregate
 plate SGs) so downstream consumers (e.g. the genomic atlas) can query array data by cohort.
 cpg-flow cannot create or validate a cohort mid-run, so the pipeline runs in two phases:
 
-1. **Phase 1** — run against the **new plate cohorts** (`input_cohorts=[new plates]`). Produces
-   and registers the per-plate `array_cohort_bed` and `array_bafregress` outputs.
+1. **Phase 1** — run against the **new plate cohorts** (`input_cohorts=[new plates]`,
+   `config_phase1.toml`). Produces and registers the per-plate `array_cohort_bed` and
+   `array_bafregress` outputs.
 2. **Create the super cohort** manually in Swagger (previous aggregate SGs ∪ new plate SGs).
-3. **Phase 2** — run against the **super cohort** (`input_cohorts=[super]`). Rolls the previous
-   aggregate forward and merges only the new plates.
+3. **Phase 2** — run against the **super cohort** (`input_cohorts=[super]`,
+   `config_phase2.toml`). Rolls the previous aggregate forward and merges only the new plates.
+
+Every stage is a `CohortStage`, so nothing in the stage graph itself separates the phases: a
+phase-2 submission would otherwise also run the per-plate stages on the super cohort, and a
+phase-1 submission would run the aggregate stages once per plate. Each phase config therefore
+pins `workflow.only_stages` to its phase's stages, and `run_workflow.py` refuses to submit when
+`only_stages` is missing or mixes stages from both phases — a mismatched config fails at
+submission, before any job is queued.
 
 The previous aggregate is selected explicitly by **cohort ID** (`previous_aggregate_cohort_id`).
 The new plates are **not listed** in phase-2 config — they are **derived**
@@ -84,12 +92,18 @@ Before running the pipeline, ensure you have the following tools installed and c
 - **Docker**: Required for running the local reproduction scripts.
 
 ## Configuration
-The pipeline is configured using a TOML file (e.g., `config.toml`). A template is provided in `src/popgen_genotyping/config_template.toml`.
+The pipeline is configured using a TOML file, one per phase: start from
+`src/popgen_genotyping/config_phase1.toml` (per-plate processing) or
+`src/popgen_genotyping/config_phase2.toml` (aggregation against the super cohort).
 
 ### Key Parameters
 - `[workflow]`:
     - `dataset`: The analysis dataset for the output.
-    - `input_cohorts`: A list of cohort IDs to include in the run.
+    - `input_cohorts`: A list of cohort IDs to include in the run — the new plate cohorts in
+      phase 1, exactly the super cohort in phase 2.
+    - `only_stages`: The stages belonging to the phase being run. Mandatory; a submission
+      that omits it or mixes stages from both phases is rejected (see
+      [Rolling aggregate & two-phase run](#rolling-aggregate--two-phase-run)).
     - `sequencing_type`: Must be set to `array`.
     - `driver_image`: The Docker image for the main `cpg-flow` driver.
     - `bcftools_image`, `plink_image`, `king_image`: Docker images for the respective tools.
@@ -108,7 +122,7 @@ To run the pipeline, use the `analysis-runner` command. You will need to specify
 analysis-runner
     --dataset <your-dataset>
     --output-dir <output-directory>
-    --config config.toml
+    --config config_phase1.toml  # or config_phase2.toml
     run_workflow.py
 ```
 
