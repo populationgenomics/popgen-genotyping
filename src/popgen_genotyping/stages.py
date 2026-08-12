@@ -4,12 +4,12 @@ This file exists to define all the Stages for the workflow.
 
 from __future__ import annotations
 
-import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from cpg_flow.stage import CohortStage, stage
 from cpg_utils.config import config_retrieve, reference_path
+from loguru import logger
 
 from popgen_genotyping.jobs.baf_regress_job import run_bafregress
 from popgen_genotyping.jobs.cohort_bcf_to_plink_job import run_cohort_bcf_to_plink
@@ -229,7 +229,9 @@ class MergeCohortPlink(CohortStage):
         )
 
         # Log the plan so an operator can confirm the derived plates match the phase-1 runs.
-        logging.info(format_merge_plan(resolved, previous_aggregate_cohort_id))
+        # loguru, not stdlib logging: cpg-flow configures loguru, while unconfigured stdlib
+        # logging drops INFO — the plan would never reach the driver log.
+        logger.info(format_merge_plan(resolved, previous_aggregate_cohort_id))
 
         cohort_plink_paths: list[dict[str, str]] = [
             {'bed': plate['bed'], 'bim': plate['bim'], 'fam': plate['fam']} for plate in resolved['plate_merge_list']
