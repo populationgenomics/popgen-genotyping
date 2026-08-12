@@ -200,12 +200,15 @@ class MergeCohortPlink(CohortStage):
         """
         Define the expected merged PLINK 1.9 fileset in temporary storage.
         """
-        # Store in tmp per requirement
+        # Store in tmp per requirement. Keyed by the super-cohort ID: every rolling aggregate
+        # gets a new super cohort, so two runs at the same workflow.version land on distinct
+        # paths — otherwise cpg-flow's skip-if-exists would silently reuse the previous super
+        # cohort's merge (and the in-job --keep count assert would never fire).
         prefix: Path = get_output_prefix(dataset=cohort.dataset, stage_name=self.name, tmp=True)
         return {
-            'bed': prefix / 'merged_cohorts.bed',
-            'bim': prefix / 'merged_cohorts.bim',
-            'fam': prefix / 'merged_cohorts.fam',
+            'bed': prefix / f'{cohort.id}_merged.bed',
+            'bim': prefix / f'{cohort.id}_merged.bim',
+            'fam': prefix / f'{cohort.id}_merged.fam',
         }
 
     def queue_jobs(self, cohort: Cohort, _inputs: StageInput) -> StageOutput:
@@ -242,7 +245,7 @@ class MergeCohortPlink(CohortStage):
 
             conversion_job, converted_plink1_resource = run_plink2_to_plink1(
                 pfile_prefix=resolved['previous_aggregate_paths'],
-                output_prefix=str(plink1_prefix),
+                output_prefix=str(plink1_prefix / f'{cohort.id}_plink1'),
                 job_name='Plink2ToPlink1',
             )
             merge_job_dependencies.append(conversion_job)
@@ -280,10 +283,10 @@ class ExportCohortDatasets(CohortStage):
         tmp_bcf_prefix: Path = get_output_prefix(dataset=cohort.dataset, stage_name=self.name, tmp=True)
         datestamp: str = datetime.now(tz=timezone.utc).strftime('%Y%m%d')
         return {
-            'pgen': prefix / f'{datestamp}_cohort.pgen',
-            'pvar': prefix / f'{datestamp}_cohort.pvar',
-            'psam': prefix / f'{datestamp}_cohort.psam',
-            'bcf': tmp_bcf_prefix / f'{datestamp}_cohort.bcf',
+            'pgen': prefix / f'{cohort.id}_{datestamp}.pgen',
+            'pvar': prefix / f'{cohort.id}_{datestamp}.pvar',
+            'psam': prefix / f'{cohort.id}_{datestamp}.psam',
+            'bcf': tmp_bcf_prefix / f'{cohort.id}_{datestamp}.bcf',
         }
 
     def queue_jobs(self, cohort: Cohort, inputs: StageInput) -> StageOutput:
@@ -324,7 +327,7 @@ class Plink2Qc(CohortStage):
         """
         prefix: Path = get_output_prefix(dataset=cohort.dataset, stage_name=self.name)
         datestamp: str = datetime.now(tz=timezone.utc).strftime('%Y%m%d')
-        output_base_name = f'{datestamp}_qc'
+        output_base_name = f'{cohort.id}_{datestamp}_qc'
         return {
             'smiss': prefix / f'{output_base_name}.smiss',
             'afreq': prefix / f'{output_base_name}.afreq',
@@ -377,7 +380,7 @@ class KingIbdseg(CohortStage):
         """
         prefix: Path = get_output_prefix(dataset=cohort.dataset, stage_name=self.name)
         datestamp: str = datetime.now(tz=timezone.utc).strftime('%Y%m%d')
-        output_base_name = f'{datestamp}_king'
+        output_base_name = f'{cohort.id}_{datestamp}_king'
         return {
             'seg': prefix / f'{output_base_name}.seg',
             'segments': prefix / f'{output_base_name}.segments.gz',
@@ -435,9 +438,9 @@ class SnpQcReport(CohortStage):
         prefix: Path = get_output_prefix(dataset=cohort.dataset, stage_name=self.name)
         datestamp: str = datetime.now(tz=timezone.utc).strftime('%Y%m%d')
         return {
-            'audit_tsv': prefix / f'{datestamp}_snp_qc.audit.tsv.gz',
-            'inclusion_list': prefix / f'{datestamp}_snp_qc.include.snplist',
-            'summary_tsv': prefix / f'{datestamp}_snp_qc.summary.tsv',
+            'audit_tsv': prefix / f'{cohort.id}_{datestamp}_snp_qc.audit.tsv.gz',
+            'inclusion_list': prefix / f'{cohort.id}_{datestamp}_snp_qc.include.snplist',
+            'summary_tsv': prefix / f'{cohort.id}_{datestamp}_snp_qc.summary.tsv',
         }
 
     def queue_jobs(self, cohort: Cohort, inputs: StageInput) -> StageOutput:
@@ -508,7 +511,7 @@ class QcReport(CohortStage):
         """
         prefix: Path = get_output_prefix(dataset=cohort.dataset, stage_name=self.name)
         datestamp: str = datetime.now(tz=timezone.utc).strftime('%Y%m%d')
-        return prefix / f'{datestamp}_qc_report.csv'
+        return prefix / f'{cohort.id}_{datestamp}_qc_report.csv'
 
     def queue_jobs(self, cohort: Cohort, inputs: StageInput) -> StageOutput:
         """

@@ -72,6 +72,11 @@ The final `plink --keep` trims the merged fileset to super-cohort membership (`m
 asserts the kept-sample count equals the super cohort (`super ⊆ merged`) before the aggregate is
 registered, so the released dataset cannot silently disagree with the cohort it registers against.
 
+All phase-2 output filenames embed the super-cohort ID (e.g. `<cohort_id>_merged.bed`,
+`<cohort_id>_<date>.pgen`). Every rolling aggregate gets a new super cohort, so successive
+aggregates at the same `workflow.version` land on distinct paths — cpg-flow's skip-if-exists
+can therefore never reuse a previous super cohort's merge for a new one.
+
 ## Prerequisites
 Before running the pipeline, ensure you have the following tools installed and configured:
 - **`cpg-flow`**: The core workflow management system.
