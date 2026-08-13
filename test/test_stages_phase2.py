@@ -7,6 +7,7 @@ QcReport (BafRegress resolved for the full super-cohort membership).
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 from popgen_genotyping.stages import KingIbdseg, MergeCohortPlink, Plink2Qc, QcReport
@@ -170,7 +171,7 @@ class TestQcReportQueueJobs:
         mock_self = MagicMock()
         mock_self.expected_outputs.return_value = report_path
 
-        def as_path(target: object, stage: object, key: str) -> Path:
+        def as_path(target: object, stage: Any, key: str) -> Path:
             del target
             return {
                 (Plink2Qc, 'smiss'): Path('/qc/COH999_20260115_qc.smiss'),
