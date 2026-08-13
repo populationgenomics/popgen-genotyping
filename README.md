@@ -118,13 +118,22 @@ The pipeline is configured using a TOML file, one per phase: start from
 ## Execution
 To run the pipeline, use the `analysis-runner` command. You will need to specify the path to your configuration file, the output directory, and the script to execute.
 
+From the repo root:
+
 ```bash
-analysis-runner
-    --dataset <your-dataset>
-    --output-dir <output-directory>
-    --config config_phase1.toml  # or config_phase2.toml
-    run_workflow.py
+analysis-runner \
+    --dataset <your-dataset> \
+    --access-level <access-level> \
+    --output-dir <output-directory> \
+    --description 'popgen genotyping phase 1' \
+    --config src/popgen_genotyping/config_phase1.toml \
+    src/popgen_genotyping/run_workflow.py
 ```
+
+For phase 2, swap in `config_phase2.toml` (and a matching description). Note the phase
+validation and the merge-plan printout run on the **driver job**, after `analysis-runner`
+has already returned — check the driver batch's log for the plan (phase 2) or for the
+ValueError if the config's `only_stages` was rejected.
 
 ## Local Development & Testing
 This repository includes scripts for local development and testing.

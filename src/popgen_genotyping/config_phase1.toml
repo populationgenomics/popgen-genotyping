@@ -44,7 +44,10 @@ storage = '50G'
 
 [popgen_genotyping.references]
 fasta_ref_path = 'gs://cpg-common-main/references/hg38/v0/Homo_sapiens_assembly38.fasta'
-bpm_manifest_path = 'gs://...'
-egt_cluster_path = 'gs://...'
+# Illumina chip manifest + cluster file. These match the GDA chip shipped under
+# gs://cpg-common-main/references/illumina_microarray/; override when running
+# against a different chip / cluster-file revision.
+bpm_manifest_path = 'gs://cpg-common-main/references/illumina_microarray/GDA-8v1-0_D2.bpm'
+egt_cluster_path = 'gs://cpg-common-main/references/illumina_microarray/GDA-8v1-0_D1_ClusterFile.egt'
 # Optional: population allele frequency reference for BAFRegress
 # af_ref_path = 'gs://...'
