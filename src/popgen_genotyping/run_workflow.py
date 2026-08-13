@@ -29,7 +29,7 @@ PHASE_1_STAGES: list = [GtcToBcfs, BafRegress, CohortBcfToPlink]
 PHASE_2_STAGES: list = [MergeCohortPlink, ExportCohortDatasets, Plink2Qc, KingIbdseg, SnpQcReport, QcReport]
 
 
-def validate_phase_stage_selection() -> None:
+def validate_phase_stage_selection(only_stages: list[str], input_cohorts: list[str]) -> None:
     """
     Require ``workflow.only_stages`` to select stages from exactly one phase.
 
@@ -38,14 +38,18 @@ def validate_phase_stage_selection() -> None:
     phase-1 submission would run the aggregate stages once per plate. Failing here means
     a mismatched config dies at submission, before any job is queued.
 
+    Args:
+        only_stages (list[str]): The ``workflow.only_stages`` config value.
+        input_cohorts (list[str]): The ``workflow.input_cohorts`` config value.
+
     Raises:
-        ValueError: If ``workflow.only_stages`` is missing, names an unknown stage, or
-            mixes phase-1 and phase-2 stages.
+        ValueError: If ``only_stages`` is missing, names an unknown stage, or mixes
+            phase-1 and phase-2 stages; or if a phase-2 selection runs against anything
+            other than exactly one cohort (the super cohort).
     """
     phase_1_names = {cls.__name__ for cls in PHASE_1_STAGES}
     phase_2_names = {cls.__name__ for cls in PHASE_2_STAGES}
 
-    only_stages: list[str] = config_retrieve(['workflow', 'only_stages'], default=[])
     if not only_stages:
         raise ValueError(
             'workflow.only_stages is not set. This pipeline runs in two phases that must not '
@@ -68,6 +72,16 @@ def validate_phase_stage_selection() -> None:
             'cohorts (new plates vs the super cohort) and must be submitted separately — start '
             'from config_phase1.toml or config_phase2.toml.'
         )
+    if selected & phase_2_names and len(input_cohorts) != 1:
+        # Every phase-2 CohortStage would otherwise run once per listed cohort, each
+        # treating its cohort as "the super cohort" and rolling forward the same
+        # previous_aggregate_cohort_id — registering multiple aggregates that claim
+        # the same lineage.
+        raise ValueError(
+            f'Phase 2 runs against exactly one cohort (the super cohort), but '
+            f'workflow.input_cohorts has {len(input_cohorts)}: {input_cohorts}. '
+            'Create the super cohort first and list only its ID.'
+        )
 
 
 def cli_main() -> None:
@@ -78,7 +92,10 @@ def cli_main() -> None:
     parser.add_argument('--dry_run', action='store_true', help='Dry run')
     args = parser.parse_args()
 
-    validate_phase_stage_selection()
+    validate_phase_stage_selection(
+        only_stages=config_retrieve(['workflow', 'only_stages'], default=[]),
+        input_cohorts=config_retrieve(['workflow', 'input_cohorts'], default=[]),
+    )
 
     # The workflow name is derived from the package name
     workflow_name: str = __package__ or 'popgen_genotyping'

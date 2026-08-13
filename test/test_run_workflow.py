@@ -2,8 +2,6 @@
 Tests for the submission-time phase check in run_workflow.py.
 """
 
-from unittest.mock import patch
-
 import pytest
 
 from popgen_genotyping import stages as stages_module
@@ -14,44 +12,62 @@ from popgen_genotyping.run_workflow import (
 )
 from popgen_genotyping.stages import CohortStage
 
-
-def _validate_with_only_stages(only_stages: list[str]) -> None:
-    with patch('popgen_genotyping.run_workflow.config_retrieve', return_value=only_stages):
-        validate_phase_stage_selection()
+PHASE_1_NAMES = ['GtcToBcfs', 'BafRegress', 'CohortBcfToPlink']
+PHASE_2_NAMES = ['MergeCohortPlink', 'ExportCohortDatasets', 'Plink2Qc', 'KingIbdseg', 'SnpQcReport', 'QcReport']
 
 
 class TestValidatePhaseStageSelection:
     """A submission must select stages from exactly one phase."""
 
     def test_phase_1_selection_passes(self) -> None:
-        _validate_with_only_stages(['GtcToBcfs', 'BafRegress', 'CohortBcfToPlink'])
+        validate_phase_stage_selection(only_stages=PHASE_1_NAMES, input_cohorts=['COH101', 'COH102'])
 
     def test_phase_2_selection_passes(self) -> None:
-        _validate_with_only_stages(
-            ['MergeCohortPlink', 'ExportCohortDatasets', 'Plink2Qc', 'KingIbdseg', 'SnpQcReport', 'QcReport']
-        )
+        validate_phase_stage_selection(only_stages=PHASE_2_NAMES, input_cohorts=['COH200'])
 
     def test_single_stage_rerun_passes(self) -> None:
         """Re-running one stage (e.g. just the QC report) is a valid phase-2 subset."""
-        _validate_with_only_stages(['QcReport'])
+        validate_phase_stage_selection(only_stages=['QcReport'], input_cohorts=['COH200'])
 
     def test_missing_only_stages_raises(self) -> None:
         with pytest.raises(ValueError, match='only_stages is not set'):
-            _validate_with_only_stages([])
+            validate_phase_stage_selection(only_stages=[], input_cohorts=['COH200'])
 
     def test_mixed_phases_raises(self) -> None:
         with pytest.raises(ValueError, match='mixes phase-1'):
-            _validate_with_only_stages(['CohortBcfToPlink', 'MergeCohortPlink'])
+            validate_phase_stage_selection(
+                only_stages=['CohortBcfToPlink', 'MergeCohortPlink'], input_cohorts=['COH200']
+            )
 
     def test_unknown_stage_raises(self) -> None:
         with pytest.raises(ValueError, match='unknown stages'):
-            _validate_with_only_stages(['NotAStage'])
+            validate_phase_stage_selection(only_stages=['NotAStage'], input_cohorts=['COH200'])
 
     def test_wrong_case_raises(self) -> None:
-        """cpg-flow matches only_stages case-sensitively when skipping, so a
-        lower-cased name would silently skip every stage — reject it here."""
+        """cpg-flow accepts wrong-cased only_stages names but skips stages by exact
+        match, so in a mixed-case list the wrong-cased stage is silently skipped while
+        the rest run (an all-lowercase list at least dies with 'No stages to run').
+        Rejecting on exact case closes the silent-partial-skip case."""
         with pytest.raises(ValueError, match='unknown stages'):
-            _validate_with_only_stages(['gtctobcfs'])
+            validate_phase_stage_selection(only_stages=['gtctobcfs'], input_cohorts=['COH101'])
+
+
+class TestPhase2CohortCardinality:
+    """Phase 2 runs against exactly one cohort: the super cohort."""
+
+    def test_multiple_phase_2_cohorts_raises(self) -> None:
+        """Two cohorts would each be treated as 'the super cohort', registering two
+        aggregates that both claim the same previous-aggregate lineage."""
+        with pytest.raises(ValueError, match='exactly one cohort'):
+            validate_phase_stage_selection(only_stages=PHASE_2_NAMES, input_cohorts=['COH200', 'COH201'])
+
+    def test_no_phase_2_cohorts_raises(self) -> None:
+        with pytest.raises(ValueError, match='exactly one cohort'):
+            validate_phase_stage_selection(only_stages=PHASE_2_NAMES, input_cohorts=[])
+
+    def test_multiple_phase_1_cohorts_pass(self) -> None:
+        """Phase 1 legitimately processes many plate cohorts in one submission."""
+        validate_phase_stage_selection(only_stages=PHASE_1_NAMES, input_cohorts=['COH101', 'COH102', 'COH103'])
 
 
 def test_phase_lists_cover_all_stages() -> None:
