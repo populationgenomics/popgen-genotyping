@@ -8,7 +8,28 @@ This pipeline is designed to automate the conversion of dense, single-sample GTC
 ## Pipeline Architecture
 The pipeline is composed of several sequential stages, orchestrated by `cpg-flow`. Each stage is responsible for a specific part of the data processing workflow.
 
-![Pipeline DAG](pipeline_dag.png)
+```mermaid
+flowchart TB
+    subgraph phase1 ["Phase 1 — per plate cohort"]
+        GtcToBcfs --> BafRegress
+        GtcToBcfs --> CohortBcfToPlink
+    end
+    subgraph phase2 ["Phase 2 — super cohort"]
+        MergeCohortPlink --> ExportCohortDatasets
+        MergeCohortPlink --> KingIbdseg
+        ExportCohortDatasets --> Plink2Qc
+        ExportCohortDatasets --> SnpQcReport
+        Plink2Qc --> QcReport
+        KingIbdseg --> QcReport
+    end
+    prev["Previous aggregate<br/>(array_aggregate_pgen)"] -. Metamist .-> MergeCohortPlink
+    CohortBcfToPlink -. "Metamist (array_cohort_bed)" .-> MergeCohortPlink
+    BafRegress -. "Metamist (array_bafregress)" .-> QcReport
+```
+
+The dashed edges are not stage dependencies: phase 2 discovers phase-1 outputs (and the
+previous aggregate) by querying registered Metamist analyses, which is what lets the two
+phases run as separate submissions with the manual super-cohort creation in between.
 
 ### Stages
 - **GtcToBcfs**: Converts raw GTC files into two BCF formats: a "Heavy" BCF containing full intensity data and a "Light" BCF containing only genotype calls (GT) and quality scores (GQ).
