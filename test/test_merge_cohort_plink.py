@@ -89,7 +89,8 @@ def test_empty_keep_samples_raises() -> None:
 
 def test_keep_samples_appends_final_keep_trim() -> None:
     """keep_samples queues a final --keep pass to super-cohort membership, allele order preserved."""
-    commands, _ = _run_merge_plink(keep_samples=['SG1', 'SG2'])
+    keep = ['SG1', 'SG2']
+    commands, _ = _run_merge_plink(keep_samples=keep)
 
     # The merge runs first, the trim last.
     assert len(commands) == 2
@@ -102,6 +103,12 @@ def test_keep_samples_appends_final_keep_trim() -> None:
     # plink --keep silently dropped a claimed SG (super ⊆ merged goes unverified otherwise).
     assert 'wc -l' in trim and '-ne 2' in trim, 'final step must assert the kept-sample count'
 
+    # --keep silently ignores IDs absent from the input, so the pass yields the intersection of the
+    # merged set and keep_samples, not equality. The in-job count is what turns a shortfall into a
+    # failure rather than a quietly smaller aggregate registered against the super cohort.
+    assert f'-ne {len(keep)}' in trim, 'retained count must be compared against the full keep-list length'
+    assert 'exit 1' in trim, 'a count mismatch must fail the job, not merely log'
+
 
 def test_keep_samples_writes_fid_iid_list() -> None:
     """The --keep list is written with the FID=0 / IID convention used by the --remove list."""
@@ -109,6 +116,18 @@ def test_keep_samples_writes_fid_iid_list() -> None:
 
     mock_to_path.assert_called_once_with('gs://o/out_samples_to_keep.txt')
     mock_to_path.return_value.write_text.assert_called_once_with('0\tSG1\n0\tSG2')
+
+
+def test_duplicate_keep_samples_do_not_inflate_expected_count() -> None:
+    """A repeated ID must not raise the expected count: --keep matches on set membership.
+
+    plink emits one .fam row per distinct sample, so counting the raw list would fail the in-job
+    check on a duplicate that changed nothing about the output.
+    """
+    commands, mock_to_path = _run_merge_plink(keep_samples=['SG2', 'SG1', 'SG2'])
+
+    mock_to_path.return_value.write_text.assert_called_once_with('0\tSG1\n0\tSG2')
+    assert '-ne 2' in commands[-1], 'expected count must be the number of distinct IDs'
 
 
 def test_keep_samples_composes_with_rolling_aggregate() -> None:

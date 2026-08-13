@@ -5,7 +5,6 @@ from __future__ import annotations
 import gzip
 import re
 import subprocess
-from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -195,26 +194,22 @@ class TestKingIbdsegExpectedOutputs:
     """Path layout that Metamist `analysis_keys=['seg', 'seg_x']` depends on."""
 
     def test_path_layout_and_naming(self) -> None:
-        """Five outputs under the standard prefix, date-stamped, no dot before X."""
+        """Five outputs under the standard prefix, cohort-keyed, no dot before X."""
         prefix = Path('/cohort/king_ibdseg')
         mock_cohort = MagicMock()
+        mock_cohort.id = 'COH123'
         mock_self = MagicMock()
         mock_self.name = 'KingIbdseg'
-        fixed_now = datetime(2026, 1, 15, tzinfo=timezone.utc)
 
-        with (
-            patch('popgen_genotyping.stages.get_output_prefix', return_value=prefix) as mock_prefix,
-            patch('popgen_genotyping.stages.datetime') as mock_datetime,
-        ):
-            mock_datetime.now.return_value = fixed_now
+        with patch('popgen_genotyping.stages.get_output_prefix', return_value=prefix) as mock_prefix:
             result = KingIbdseg.expected_outputs(mock_self, mock_cohort)
 
         assert result == {
-            'seg': prefix / '20260115_king.seg',
-            'segments': prefix / '20260115_king.segments.gz',
-            'seg_x': prefix / '20260115_kingX.seg',
-            'segments_x': prefix / '20260115_kingX.segments.gz',
-            'log': prefix / '20260115_king.log',
+            'seg': prefix / 'COH123_king.seg',
+            'segments': prefix / 'COH123_king.segments.gz',
+            'seg_x': prefix / 'COH123_kingX.seg',
+            'segments_x': prefix / 'COH123_kingX.segments.gz',
+            'log': prefix / 'COH123_king.log',
         }
         mock_prefix.assert_called_once_with(
             dataset=mock_cohort.dataset,

@@ -1,14 +1,20 @@
-# this is a template for the config file
-# demonstrating some of the common options used in cpg-flow
+# Phase 2: aggregation. Run against the super cohort (previous aggregate SGs +
+# new plate SGs) — normally created and submitted automatically by phase 1's
+# SubmitPhase2 stage; use this config for a manual phase-2 run (second_workflow)
+# against an existing super cohort. Rolls the previous aggregate forward, merges
+# the new plates, and registers the aggregate and QC outputs against the super
+# cohort. See "Rolling aggregate & two-phase run" in the README.
 [workflow]
-
-# TODO(you): update this to reflect the workflow's name
 name = 'popgen_genotyping'
 
 # mandatory fields for cpg-flow, not populated by analysis-runner
 dataset = 'ourdna'
-input_cohorts = []
+# Exactly one cohort: the manually created super cohort.
+input_cohorts = ['COH200']
 sequencing_type = 'array'
+
+# The second_workflow entry point pins this run to the phase-2 stages; set
+# only_stages only for a within-phase subset (e.g. re-running just the QC report).
 
 # used to make sure we don't repeat previously completed stages
 check_expected_outputs = true
@@ -16,32 +22,16 @@ check_expected_outputs = true
 # the method to register outputs, can be missing - will not generate metamist analysis entries
 status_reporter = 'metamist'
 
-# TODO(you): set to the current tag of this repo's own image. The SubmitPhase2 job runs
-# in it and needs the popgen_genotyping package, and it doubles as the image the phase-2
-# run is submitted with (no repo checkout). Pin an exact tag, never ':latest': phase 2
-# resolves this string at its own start, so a floating tag can run the two phases on
-# different code. CI builds a new tag on every merge to main; list them with:
+# TODO(you): set to the current tag of this repo's own image — the phase-2 driver runs
+# in it and needs the popgen_genotyping package. An automatic hand-off forwards phase 1's
+# driver_image instead of reading this file; pin an exact tag, never ':latest'. CI builds
+# a new tag on every merge to main; list them with:
 #   gcloud artifacts docker tags list australia-southeast1-docker.pkg.dev/cpg-common/images/popgen_genotyping
 driver_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/popgen_genotyping:0.1.0-28'
 bcftools_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/bcftools:1.23-1'
 plink_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/plink:1.9-20250819-PLINK-2.0-20260228-1'
 king_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/king:2.3.2-1'
 version = 1
-
-[popgen_genotyping.gtc_to_bcfs]
-cpu = 2
-memory = 'standard'
-storage = '50G'
-
-[popgen_genotyping.baf_regress]
-cpu = 1
-memory = 'standard'
-storage = '10G'
-
-[popgen_genotyping.cohort_bcf_to_plink]
-cpu = 8
-memory = 'highmem'
-storage = '50G'
 
 [popgen_genotyping.merge_cohort_plink]
 cpu = 4
@@ -52,13 +42,6 @@ storage = '100G'
 # There is no default, so a forgotten entry fails the run instead of silently building a
 # new-plates-only aggregate. Use scripts/list_aggregates.py to pick a cohort ID.
 # previous_aggregate_cohort_id = 'COH123'
-
-[popgen_genotyping.submit_phase2]
-# TODO(you): uncomment and set. Required for phase 1 (first_workflow): name for the super
-# cohort the SubmitPhase2 stage creates (previous aggregate SGs + this run's plate SGs).
-# Must not collide with an existing cohort name; if a cohort with identical membership
-# already exists it is reused and this name is ignored.
-# super_cohort_name = 'array-aggregate-2026-08-10'
 
 [popgen_genotyping.export_cohort_datasets]
 cpu = 2
@@ -112,10 +95,3 @@ hwe_keep_fewhet = true
 cpu = 2
 memory = 'standard'
 storage = '20G'
-
-[popgen_genotyping.references]
-fasta_ref_path = 'gs://cpg-common-main/references/hg38/v0/Homo_sapiens_assembly38.fasta'
-bpm_manifest_path = 'gs://...'
-egt_cluster_path = 'gs://...'
-# Optional: population allele frequency reference for BAFRegress
-# af_ref_path = 'gs://...'

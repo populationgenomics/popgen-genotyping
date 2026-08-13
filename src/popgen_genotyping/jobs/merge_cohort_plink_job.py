@@ -165,8 +165,13 @@ def run_merge_plink(
     #    merged (a plate may carry withdrawn/excluded SGs), so this final --keep is what
     #    guarantees merged ⊆ super cohort. Uses the same FID=0 / IID convention as the
     #    --remove list above.
+    # --keep matches on set membership, so a duplicate ID writes a duplicate line but still
+    # yields one .fam row — counting the raw list would fail the check below for no real
+    # reason. Dedupe once so the written file and the expected count cannot disagree, sorted
+    # so the file is reproducible when the caller passes an unordered collection.
+    unique_keep_samples = sorted(set(keep_samples))
     keep_list_path = f'{output_prefix}_samples_to_keep.txt'
-    to_path(keep_list_path).write_text('\n'.join([f'0\t{s}' for s in keep_samples]))
+    to_path(keep_list_path).write_text('\n'.join([f'0\t{s}' for s in unique_keep_samples]))
     keep_samples_resource = b.read_input(keep_list_path)
 
     # --keep-allele-order: preserve the A1=ALT/A2=REF orientation through the trim
@@ -185,8 +190,8 @@ def run_merge_plink(
             --keep-allele-order --make-bed --out {j.output_plink}
 
         kept=$(wc -l < {j.output_plink.fam})
-        if [ "$kept" -ne {len(keep_samples)} ]; then
-            echo "expected {len(keep_samples)} samples after --keep, got $kept" >&2
+        if [ "$kept" -ne {len(unique_keep_samples)} ]; then
+            echo "expected {len(unique_keep_samples)} samples after --keep, got $kept" >&2
             exit 1
         fi
         """

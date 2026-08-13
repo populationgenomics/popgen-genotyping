@@ -4,12 +4,11 @@ This file exists to define all the Stages for the workflow.
 
 from __future__ import annotations
 
-import logging
-from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from cpg_flow.stage import CohortStage, MultiCohortStage, stage
 from cpg_utils.config import config_retrieve, reference_path
+from loguru import logger
 
 from popgen_genotyping.jobs.baf_regress_job import run_bafregress
 from popgen_genotyping.jobs.cohort_bcf_to_plink_job import run_cohort_bcf_to_plink
@@ -245,12 +244,15 @@ class MergeCohortPlink(CohortStage):
         """
         Define the expected merged PLINK 1.9 fileset in temporary storage.
         """
-        # Store in tmp per requirement
+        # Store in tmp per requirement. Keyed by the super-cohort ID: every rolling aggregate
+        # gets a new super cohort, so two runs at the same workflow.version land on distinct
+        # paths — otherwise cpg-flow's skip-if-exists would silently reuse the previous super
+        # cohort's merge (and the in-job --keep count assert would never fire).
         prefix: Path = get_output_prefix(dataset=cohort.dataset, stage_name=self.name, tmp=True)
         return {
-            'bed': prefix / 'merged_cohorts.bed',
-            'bim': prefix / 'merged_cohorts.bim',
-            'fam': prefix / 'merged_cohorts.fam',
+            'bed': prefix / f'{cohort.id}_merged.bed',
+            'bim': prefix / f'{cohort.id}_merged.bim',
+            'fam': prefix / f'{cohort.id}_merged.fam',
         }
 
     def queue_jobs(self, cohort: Cohort, _inputs: StageInput) -> StageOutput:
@@ -269,7 +271,9 @@ class MergeCohortPlink(CohortStage):
         )
 
         # Log the plan so an operator can confirm the derived plates match the phase-1 runs.
-        logging.info(format_merge_plan(resolved, previous_aggregate_cohort_id))
+        # loguru, not stdlib logging: cpg-flow configures loguru, while unconfigured stdlib
+        # logging drops INFO — the plan would never reach the driver log.
+        logger.info(format_merge_plan(resolved, previous_aggregate_cohort_id))
 
         cohort_plink_paths: list[dict[str, str]] = [
             {'bed': plate['bed'], 'bim': plate['bim'], 'fam': plate['fam']} for plate in resolved['plate_merge_list']
@@ -285,7 +289,7 @@ class MergeCohortPlink(CohortStage):
 
             conversion_job, converted_plink1_resource = run_plink2_to_plink1(
                 pfile_prefix=resolved['previous_aggregate_paths'],
-                output_prefix=str(plink1_prefix),
+                output_prefix=str(plink1_prefix / f'{cohort.id}_plink1'),
                 job_name='Plink2ToPlink1',
             )
             merge_job_dependencies.append(conversion_job)
@@ -319,14 +323,16 @@ class ExportCohortDatasets(CohortStage):
         Define the expected PLINK2 outputs to long-term storage.
         BCF output goes to tmp for analysis, as it is too large for long term storage.
         """
+        # No datestamp: the cohort ID (plus the versioned prefix) already distinguishes
+        # aggregates, and paths must be stable across days for skip-if-exists and
+        # single-stage reruns to find upstream outputs. Same for all phase-2 stages.
         prefix: Path = get_output_prefix(dataset=cohort.dataset, stage_name=self.name)
         tmp_bcf_prefix: Path = get_output_prefix(dataset=cohort.dataset, stage_name=self.name, tmp=True)
-        datestamp: str = datetime.now(tz=timezone.utc).strftime('%Y%m%d')
         return {
-            'pgen': prefix / f'{datestamp}_cohort.pgen',
-            'pvar': prefix / f'{datestamp}_cohort.pvar',
-            'psam': prefix / f'{datestamp}_cohort.psam',
-            'bcf': tmp_bcf_prefix / f'{datestamp}_cohort.bcf',
+            'pgen': prefix / f'{cohort.id}.pgen',
+            'pvar': prefix / f'{cohort.id}.pvar',
+            'psam': prefix / f'{cohort.id}.psam',
+            'bcf': tmp_bcf_prefix / f'{cohort.id}.bcf',
         }
 
     def queue_jobs(self, cohort: Cohort, inputs: StageInput) -> StageOutput:
@@ -366,8 +372,7 @@ class Plink2Qc(CohortStage):
         Define the expected PLINK2 QC output files for the cohort.
         """
         prefix: Path = get_output_prefix(dataset=cohort.dataset, stage_name=self.name)
-        datestamp: str = datetime.now(tz=timezone.utc).strftime('%Y%m%d')
-        output_base_name = f'{datestamp}_qc'
+        output_base_name = f'{cohort.id}_qc'
         return {
             'smiss': prefix / f'{output_base_name}.smiss',
             'afreq': prefix / f'{output_base_name}.afreq',
@@ -419,8 +424,7 @@ class KingIbdseg(CohortStage):
         when the input has no chrX, so these outputs are always materialised.
         """
         prefix: Path = get_output_prefix(dataset=cohort.dataset, stage_name=self.name)
-        datestamp: str = datetime.now(tz=timezone.utc).strftime('%Y%m%d')
-        output_base_name = f'{datestamp}_king'
+        output_base_name = f'{cohort.id}_king'
         return {
             'seg': prefix / f'{output_base_name}.seg',
             'segments': prefix / f'{output_base_name}.segments.gz',
@@ -476,11 +480,10 @@ class SnpQcReport(CohortStage):
         Define the audit TSV, inclusion list, and summary TSV outputs.
         """
         prefix: Path = get_output_prefix(dataset=cohort.dataset, stage_name=self.name)
-        datestamp: str = datetime.now(tz=timezone.utc).strftime('%Y%m%d')
         return {
-            'audit_tsv': prefix / f'{datestamp}_snp_qc.audit.tsv.gz',
-            'inclusion_list': prefix / f'{datestamp}_snp_qc.include.snplist',
-            'summary_tsv': prefix / f'{datestamp}_snp_qc.summary.tsv',
+            'audit_tsv': prefix / f'{cohort.id}_snp_qc.audit.tsv.gz',
+            'inclusion_list': prefix / f'{cohort.id}_snp_qc.include.snplist',
+            'summary_tsv': prefix / f'{cohort.id}_snp_qc.summary.tsv',
         }
 
     def queue_jobs(self, cohort: Cohort, inputs: StageInput) -> StageOutput:
@@ -550,8 +553,7 @@ class QcReport(CohortStage):
         Define the expected QC report output file for the cohort.
         """
         prefix: Path = get_output_prefix(dataset=cohort.dataset, stage_name=self.name)
-        datestamp: str = datetime.now(tz=timezone.utc).strftime('%Y%m%d')
-        return prefix / f'{datestamp}_qc_report.csv'
+        return prefix / f'{cohort.id}_qc_report.csv'
 
     def queue_jobs(self, cohort: Cohort, inputs: StageInput) -> StageOutput:
         """
@@ -568,8 +570,11 @@ class QcReport(CohortStage):
 
         # Resolve the BafRegress output for every super-cohort SG from Metamist (full membership,
         # not just the new plates), since BafRegress does not run as a phase-2 stage.
+        # The map is sg_id -> plate-level file (one file per plate cohort), so dedupe before
+        # passing it on: repeating a plate file once per SG would multiply that plate's rows
+        # in the report's IID merge. Sorted for a reproducible job command.
         bafregress_map: dict[str, str] = resolve_bafregress_map(sg_ids=cohort.get_sequencing_group_ids())
-        bafregress_paths: list[str] = list(bafregress_map.values())
+        bafregress_paths: list[str] = sorted(set(bafregress_map.values()))
 
         # Call the Hail Batch job function
         j: BashJob = run_qc_report(

@@ -8,7 +8,28 @@ This pipeline is designed to automate the conversion of dense, single-sample GTC
 ## Pipeline Architecture
 The pipeline is composed of several sequential stages, orchestrated by `cpg-flow`. Each stage is responsible for a specific part of the data processing workflow.
 
-![Pipeline DAG](pipeline_dag.png)
+```mermaid
+flowchart TB
+    subgraph phase1 ["Phase 1 — per plate cohort"]
+        GtcToBcfs --> BafRegress
+        GtcToBcfs --> CohortBcfToPlink
+    end
+    subgraph phase2 ["Phase 2 — super cohort"]
+        MergeCohortPlink --> ExportCohortDatasets
+        MergeCohortPlink --> KingIbdseg
+        ExportCohortDatasets --> Plink2Qc
+        ExportCohortDatasets --> SnpQcReport
+        Plink2Qc --> QcReport
+        KingIbdseg --> QcReport
+    end
+    prev["Previous aggregate<br/>(array_aggregate_pgen)"] -. Metamist .-> MergeCohortPlink
+    CohortBcfToPlink -. "Metamist (array_cohort_bed)" .-> MergeCohortPlink
+    BafRegress -. "Metamist (array_bafregress)" .-> QcReport
+```
+
+The dashed edges are not stage dependencies: phase 2 discovers phase-1 outputs (and the
+previous aggregate) by querying registered Metamist analyses, which is what lets the two
+phases run as separate submissions with the manual super-cohort creation in between.
 
 ### Stages
 - **GtcToBcfs**: Converts raw GTC files into two BCF formats: a "Heavy" BCF containing full intensity data and a "Light" BCF containing only genotype calls (GT) and quality scores (GQ).
@@ -41,16 +62,27 @@ cpg-flow cannot create or validate a cohort mid-run — a cohort must exist befo
 built — so the pipeline runs as two chained analysis-runner runs with separate entry points:
 
 1. **Phase 1 (`first_workflow`)** — run against the **new plate cohorts**
-   (`input_cohorts=[new plates]`). Produces and registers the per-plate `array_cohort_bed`
-   and `array_bafregress` outputs. The final `SubmitPhase2` stage then, in a batch job:
-   creates the super cohort (previous aggregate SGs ∪ this run's plate SGs, reusing an
-   existing cohort with identical membership rather than duplicating it) and submits phase 2
-   against it. The hand-off works because the cohort is created at batch runtime, before the
-   phase-2 driver builds its DAG. The job POSTs to the analysis-runner server directly and
-   fails loudly on any HTTP error (the `run_analysis_runner` helper swallows them).
+   (`input_cohorts=[new plates]`, `config_phase1.toml`). Produces and registers the per-plate
+   `array_cohort_bed` and `array_bafregress` outputs. The final `SubmitPhase2` stage then, in
+   a batch job: creates the super cohort (previous aggregate SGs ∪ this run's plate SGs,
+   reusing an existing cohort with identical membership rather than duplicating it) and
+   submits phase 2 against it. The hand-off works because the cohort is created at batch
+   runtime, before the phase-2 driver builds its DAG. The job POSTs to the analysis-runner
+   server directly and fails loudly on any HTTP error (the `run_analysis_runner` helper
+   swallows them).
 2. **Phase 2 (`second_workflow`)** — runs against the **super cohort**
-   (`input_cohorts=[super]`, set automatically by `SubmitPhase2`). Rolls the previous
-   aggregate forward and merges only the new plates.
+   (`input_cohorts=[super]`, set automatically by `SubmitPhase2`; `config_phase2.toml` for a
+   manual run). Rolls the previous aggregate forward and merges only the new plates.
+
+Every stage is a `CohortStage`, so nothing in the stage graph itself separates the phases: a
+phase-2 submission would otherwise also run the per-plate stages on the super cohort, and a
+phase-1 submission would run the aggregate stages once per plate. The split entry points are
+what pin each submission to its phase's stages. Each entry point additionally rejects a
+`workflow.only_stages` selection naming stages outside its phase (cpg-flow skips stages by
+exact name match, so a typo or other-phase name would be silently skipped), and
+`second_workflow` refuses to run against anything other than exactly one cohort (the super
+cohort) — a mismatched config fails at submission (in the driver job's log), before any job
+is queued.
 
 To accumulate plates across several phase-1 runs before a single aggregation, set
 `workflow.last_stages = ['BafRegress', 'CohortBcfToPlink']` on the early runs so only the
@@ -94,6 +126,13 @@ The final `plink --keep` trims the merged fileset to super-cohort membership (`m
 asserts the kept-sample count equals the super cohort (`super ⊆ merged`) before the aggregate is
 registered, so the released dataset cannot silently disagree with the cohort it registers against.
 
+All phase-2 output filenames embed the super-cohort ID (e.g. `<cohort_id>_merged.bed`,
+`<cohort_id>.pgen`). Every rolling aggregate gets a new super cohort, so successive
+aggregates at the same `workflow.version` land on distinct paths — cpg-flow's skip-if-exists
+can therefore never reuse a previous super cohort's merge for a new one. The filenames carry
+no datestamp: paths are stable across days, so an interrupted phase 2 can be resumed (or a
+single stage re-run with `only_stages`) later without recomputing everything upstream.
+
 ## Prerequisites
 Before running the pipeline, ensure you have the following tools installed and configured:
 - **`cpg-flow`**: The core workflow management system.
@@ -101,12 +140,19 @@ Before running the pipeline, ensure you have the following tools installed and c
 - **Docker**: Required for running the local reproduction scripts.
 
 ## Configuration
-The pipeline is configured using a TOML file (e.g., `config.toml`). A template is provided in `src/popgen_genotyping/config_template.toml`.
+The pipeline is configured using a TOML file, one per phase: start from
+`src/popgen_genotyping/config_phase1.toml` (per-plate processing) or
+`src/popgen_genotyping/config_phase2.toml` (aggregation against the super cohort).
 
 ### Key Parameters
 - `[workflow]`:
     - `dataset`: The analysis dataset for the output.
-    - `input_cohorts`: A list of cohort IDs to include in the run.
+    - `input_cohorts`: A list of cohort IDs to include in the run — the new plate cohorts in
+      phase 1, exactly the super cohort in phase 2.
+    - `only_stages` (optional): A within-phase subset to re-run (e.g. just `QcReport`).
+      The entry point pins the phase's stage list; a selection naming stages outside the
+      phase is rejected (see
+      [Rolling aggregate & two-phase run](#rolling-aggregate--two-phase-run)).
     - `sequencing_type`: Must be set to `array`.
     - `driver_image`: The Docker image for the main `cpg-flow` driver.
     - `bcftools_image`, `plink_image`, `king_image`: Docker images for the respective tools.
@@ -124,6 +170,8 @@ The pipeline is configured using a TOML file (e.g., `config.toml`). A template i
 Launch phase 1 with the `analysis-runner` command against this repo's image (the phase-2 run
 is submitted automatically):
 
+From the repo root:
+
 ```bash
 analysis-runner \
     --skip-repo-checkout \
@@ -131,7 +179,7 @@ analysis-runner \
     --dataset <your-dataset> \
     --access-level full \
     --output-dir <output-directory> \
-    --config config.toml \
+    --config src/popgen_genotyping/config_phase1.toml \
     --description 'popgen genotyping phase 1' \
     first_workflow
 ```
@@ -147,8 +195,11 @@ different code. CI builds a new `<VERSION>-<n>` tag on every merge to main; list
 gcloud artifacts docker tags list australia-southeast1-docker.pkg.dev/cpg-common/images/popgen_genotyping
 ```
 
-To run phase 2 manually against an existing super cohort, set
-`workflow.input_cohorts = [<super cohort ID>]` and substitute `second_workflow` above.
+To run phase 2 manually against an existing super cohort, swap in `config_phase2.toml` with
+`workflow.input_cohorts = [<super cohort ID>]` (and a matching description) and substitute
+`second_workflow` above. Note the submission-time checks and the merge-plan printout run on
+the **driver job**, after `analysis-runner` has already returned — check the driver batch's
+log for the plan (phase 2) or for the ValueError if the config was rejected.
 
 ## Local Development & Testing
 This repository includes scripts for local development and testing.

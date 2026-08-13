@@ -72,6 +72,34 @@ def get_previous_aggregate_cohort_id() -> str | None:
     return value
 
 
+def validate_only_stages(only_stages: list[str], phase_stages: list, entry_point: str) -> None:
+    """
+    Reject a ``workflow.only_stages`` selection naming stages this entry point does not run.
+
+    Each phase has its own entry point with a fixed stage list, so ``only_stages`` is only
+    ever a within-phase subset (e.g. re-running just the QC report). cpg-flow skips stages
+    by exact name match, so a typo, a wrong-cased name, or a stage from the other phase
+    would otherwise be silently skipped while the rest of the selection runs.
+
+    Args:
+        only_stages (list[str]): The ``workflow.only_stages`` config value; empty runs
+            every stage of the phase.
+        phase_stages (list): The stage classes this entry point submits.
+        entry_point (str): The entry-point name, for the error message.
+
+    Raises:
+        ValueError: If ``only_stages`` names a stage outside this entry point's phase.
+    """
+    known = {cls.__name__ for cls in phase_stages}
+    unknown = set(only_stages) - known
+    if unknown:
+        raise ValueError(
+            f'workflow.only_stages names stages {sorted(unknown)} that {entry_point} does not run; '
+            f'its stages are {sorted(known)} (exact case). The phases run against different cohorts '
+            '(new plates vs the super cohort) and each has its own entry point — see the README.'
+        )
+
+
 def get_sequencing_group_cohort(sequencing_group: SequencingGroup) -> Cohort:
     """
     Resolve the cohort a sequencing group belongs to by searching the multi-cohort.
