@@ -162,7 +162,12 @@ class TestQcReportQueueJobs:
     """Wire-up between upstream QC outputs, the BafRegress map, and the report job."""
 
     def test_passes_inputs_and_full_membership_bafregress(self) -> None:
-        """BafRegress is resolved for every super-cohort SG, not just the new plates."""
+        """BafRegress is resolved for every super-cohort SG, not just the new plates.
+
+        The resolved map is sg_id -> plate-level file, so SGs sharing a plate map to the
+        same file (CPG1/CPG2 below); the job must receive each plate file once — a repeat
+        would multiply that plate's rows in the report's IID merge.
+        """
         mock_cohort = MagicMock()
         mock_cohort.name = 'super_cohort'
         mock_cohort.get_sequencing_group_ids.return_value = SUPER_SG_IDS
@@ -197,7 +202,7 @@ class TestQcReportQueueJobs:
         mock_run.assert_called_once_with(
             plink_qc_prefix='/qc/COH999_20260115_qc',
             king_seg_path='/king/COH999_20260115_king.seg',
-            bafregress_paths=list(bafregress_map.values()),
+            bafregress_paths=['gs://baf/COHP1.BAFRegress.txt', 'gs://baf/COHP2.BAFRegress.txt'],
             output_path=str(report_path),
             job_name='QcReport_super_cohort',
         )

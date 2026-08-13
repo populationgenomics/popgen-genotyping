@@ -530,8 +530,11 @@ class QcReport(CohortStage):
 
         # Resolve the BafRegress output for every super-cohort SG from Metamist (full membership,
         # not just the new plates), since BafRegress does not run as a phase-2 stage.
+        # The map is sg_id -> plate-level file (one file per plate cohort), so dedupe before
+        # passing it on: repeating a plate file once per SG would multiply that plate's rows
+        # in the report's IID merge. Sorted for a reproducible job command.
         bafregress_map: dict[str, str] = resolve_bafregress_map(sg_ids=cohort.get_sequencing_group_ids())
-        bafregress_paths: list[str] = list(bafregress_map.values())
+        bafregress_paths: list[str] = sorted(set(bafregress_map.values()))
 
         # Call the Hail Batch job function
         j: BashJob = run_qc_report(
