@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from cpg_flow.stage import CohortStage, stage
+from cpg_flow.stage import CohortStage, MultiCohortStage, stage
 from cpg_utils.config import config_retrieve, reference_path
 from loguru import logger
 
@@ -20,6 +20,7 @@ from popgen_genotyping.jobs.plink2_qc_job import run_plink2_qc
 from popgen_genotyping.jobs.plink2_to_plink1_job import run_plink2_to_plink1
 from popgen_genotyping.jobs.qc_report_job import run_qc_report
 from popgen_genotyping.jobs.snp_qc_report_job import run_snp_qc_report
+from popgen_genotyping.jobs.submit_phase2_job import run_submit_phase2
 from popgen_genotyping.metamist_utils import (
     format_merge_plan,
     query_reported_sex,
@@ -27,13 +28,13 @@ from popgen_genotyping.metamist_utils import (
     resolve_cohort_gtc_mapping,
     resolve_merge_inputs,
 )
-from popgen_genotyping.utils import get_output_prefix
+from popgen_genotyping.utils import get_output_prefix, get_previous_aggregate_cohort_id
 
 if TYPE_CHECKING:
     from cpg_flow.stage import StageInput, StageOutput
-    from cpg_flow.targets import Cohort
+    from cpg_flow.targets import Cohort, MultiCohort
     from cpg_utils import Path
-    from hailtop.batch.job import BashJob
+    from hailtop.batch.job import BashJob, PythonJob
     from hailtop.batch.resource import ResourceGroup
 
 
@@ -181,6 +182,50 @@ class CohortBcfToPlink(CohortStage):
         return self.make_outputs(cohort, data=outputs, jobs=[j])
 
 
+@stage(required_stages=[BafRegress, CohortBcfToPlink])
+class SubmitPhase2(MultiCohortStage):
+    """
+    Create the super cohort in Metamist and submit the phase-2 workflow.
+
+    Final phase-1 stage: runs once, after the plate cohorts' compute jobs. cpg-flow's
+    Metamist registration jobs are not stage dependencies, so the batch job first waits
+    for every plate cohort's ``array_bafregress`` and ``array_cohort_bed`` analyses to be
+    registered (phase 2 resolves them at driver startup). It then computes the
+    super-cohort membership (previous aggregate cohort SGs, if configured, union this run's
+    plate SGs), creates the cohort — reusing an existing cohort with identical membership —
+    and submits ``second_workflow`` against it via analysis-runner. The sentinel output
+    prevents a duplicate submission on a re-run.
+    """
+
+    def expected_outputs(self, multicohort: MultiCohort) -> Path:
+        """
+        Define the submission-record sentinel TOML path.
+        """
+        prefix: Path = get_output_prefix(dataset=multicohort.analysis_dataset, stage_name=self.name)
+        return prefix / f'{multicohort.name}_phase2_submitted.toml'
+
+    def queue_jobs(self, multicohort: MultiCohort, _inputs: StageInput) -> StageOutput:
+        """
+        Queue the super-cohort creation + phase-2 submission job.
+        """
+        outputs: Path = self.expected_outputs(multicohort)
+
+        # Required: the name for the super cohort this run will create.
+        super_cohort_name: str = config_retrieve(['popgen_genotyping', 'submit_phase2', 'super_cohort_name'])
+        # Same key MergeCohortPlink reads in phase 2, so the two phases cannot drift.
+        previous_aggregate_cohort_id: str | None = get_previous_aggregate_cohort_id()
+
+        j: PythonJob = run_submit_phase2(
+            plate_sg_ids=multicohort.get_sequencing_group_ids(),
+            plate_cohort_ids=[cohort.id for cohort in multicohort.get_cohorts()],
+            previous_aggregate_cohort_id=previous_aggregate_cohort_id,
+            super_cohort_name=super_cohort_name,
+            output_path=str(outputs),
+        )
+
+        return self.make_outputs(multicohort, data=outputs, jobs=[j])
+
+
 @stage
 class MergeCohortPlink(CohortStage):
     """
@@ -218,9 +263,7 @@ class MergeCohortPlink(CohortStage):
 
         # 1. Resolve the merge plan from Metamist. The super cohort is the source of truth;
         #    new plates are derived (NEW = super - previous aggregate), not listed in config.
-        previous_aggregate_cohort_id: str | None = config_retrieve(
-            ['popgen_genotyping', 'merge_cohort_plink', 'previous_aggregate_cohort_id'], default=None
-        )
+        previous_aggregate_cohort_id: str | None = get_previous_aggregate_cohort_id()
         super_cohort_sg_ids: list[str] = cohort.get_sequencing_group_ids()
         resolved: dict = resolve_merge_inputs(
             super_cohort_sg_ids=super_cohort_sg_ids,

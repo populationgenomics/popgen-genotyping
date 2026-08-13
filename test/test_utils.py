@@ -4,7 +4,7 @@ Tests for utils.py.
 
 from unittest.mock import MagicMock, patch
 import pytest
-from popgen_genotyping.utils import get_output_prefix, parse_psam
+from popgen_genotyping.utils import get_output_prefix, get_previous_aggregate_cohort_id, parse_psam
 
 
 @pytest.fixture
@@ -82,3 +82,33 @@ def test_get_output_prefix_tmp(mock_get_workflow, mock_config_retrieve, tmp_path
 
     dataset.prefix.assert_called_once_with(category='tmp')
     assert result == tmp_path / 'wf' / 'MyStage' / '1'
+
+
+@patch('popgen_genotyping.utils.config_retrieve')
+def test_get_previous_aggregate_cohort_id(mock_config_retrieve):
+    mock_config_retrieve.return_value = 'COH123'
+
+    assert get_previous_aggregate_cohort_id() == 'COH123'
+
+
+@patch('popgen_genotyping.utils.config_retrieve')
+def test_get_previous_aggregate_cohort_id_bootstrap(mock_config_retrieve):
+    mock_config_retrieve.return_value = 'bootstrap'
+
+    assert get_previous_aggregate_cohort_id() is None
+
+
+@patch('popgen_genotyping.utils.config_retrieve')
+def test_get_previous_aggregate_cohort_id_invalid_raises(mock_config_retrieve):
+    mock_config_retrieve.return_value = 'true'
+
+    with pytest.raises(ValueError, match=r"cohort ID .* or the literal 'bootstrap'"):
+        get_previous_aggregate_cohort_id()
+
+
+@patch('popgen_genotyping.utils.config_retrieve')
+def test_get_previous_aggregate_cohort_id_empty_raises(mock_config_retrieve):
+    mock_config_retrieve.return_value = ''
+
+    with pytest.raises(ValueError):
+        get_previous_aggregate_cohort_id()

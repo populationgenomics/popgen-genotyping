@@ -66,7 +66,7 @@ class TestMergeCohortPlinkQueueJobs:
         plink1_prefix = Path('/merge/plink2_to_plink1')
 
         with (
-            patch('popgen_genotyping.stages.config_retrieve', return_value='COH123') as mock_config,
+            patch('popgen_genotyping.stages.get_previous_aggregate_cohort_id', return_value='COH123') as mock_previous,
             patch(
                 'popgen_genotyping.stages.resolve_merge_inputs',
                 return_value=_resolved(previous_aggregate_paths='gs://prev/agg'),
@@ -80,11 +80,10 @@ class TestMergeCohortPlinkQueueJobs:
         ):
             MergeCohortPlink.queue_jobs(mock_self, mock_cohort, MagicMock())
 
-        # The previous aggregate comes from config; the plan is resolved from the super
-        # cohort's membership (the cohort is the source of truth, plates are derived).
-        mock_config.assert_called_once_with(
-            ['popgen_genotyping', 'merge_cohort_plink', 'previous_aggregate_cohort_id'], default=None
-        )
+        # The previous aggregate comes from the required config key (shared with the
+        # SubmitPhase2 stage); the plan is resolved from the super cohort's membership
+        # (the cohort is the source of truth, plates are derived).
+        mock_previous.assert_called_once_with()
         mock_resolve.assert_called_once_with(
             super_cohort_sg_ids=SUPER_SG_IDS,
             previous_aggregate_cohort_id='COH123',
@@ -119,7 +118,7 @@ class TestMergeCohortPlinkQueueJobs:
         mock_self.expected_outputs.return_value = MERGE_OUTPUTS
 
         with (
-            patch('popgen_genotyping.stages.config_retrieve', return_value=None),
+            patch('popgen_genotyping.stages.get_previous_aggregate_cohort_id', return_value=None),
             patch(
                 'popgen_genotyping.stages.resolve_merge_inputs',
                 return_value=_resolved(previous_aggregate_paths=None),
@@ -140,7 +139,7 @@ class TestMergeCohortPlinkQueueJobs:
         mock_self.expected_outputs.return_value = MERGE_OUTPUTS
 
         with (
-            patch('popgen_genotyping.stages.config_retrieve', return_value=None),
+            patch('popgen_genotyping.stages.get_previous_aggregate_cohort_id', return_value=None),
             patch(
                 'popgen_genotyping.stages.resolve_merge_inputs',
                 return_value=_resolved(previous_aggregate_paths=None),

@@ -35,6 +35,7 @@ phases run as separate submissions with the manual super-cohort creation in betw
 - **GtcToBcfs**: Converts raw GTC files into two BCF formats: a "Heavy" BCF containing full intensity data and a "Light" BCF containing only genotype calls (GT) and quality scores (GQ).
 - **BafRegress**: Estimates sample contamination by analyzing B-Allele Frequencies (BAF) against a population reference. If no reference is provided, it will estimate AF from the cohort. Output is written to durable, version-independent storage and registered as an `array_bafregress` Metamist analysis (one per plate cohort).
 - **CohortBcfToPlink**: Converts the Light BCF into PLINK 1.9 binary format (`.bed`, `.bim`, `.fam`), preparing it for merging. Output is written to durable, version-independent storage and registered as an `array_cohort_bed` Metamist analysis (one per plate cohort). See [Per-plate outputs are immutable](#per-plate-outputs-are-immutable).
+- **SubmitPhase2**: The final phase-1 stage. Creates the super cohort in Metamist (previous aggregate SGs ∪ this run's plate SGs) and submits `second_workflow` against it via analysis-runner. See [Rolling aggregate & two-phase run](#rolling-aggregate--two-phase-run).
 - **MergeCohortPlink**: Merges PLINK files from multiple cohorts into a single, unified dataset. This stage also supports a "rolling aggregate" workflow, where new samples are added to a previously generated aggregate. See [Rolling aggregate & two-phase run](#rolling-aggregate--two-phase-run).
 - **ExportCohortDatasets**: Converts the merged PLINK 1.9 dataset into PLINK2 (`.pgen`) format for long-term storage and analysis, and `.bcf` format in temporary storage for ancestry analysis.
 - **Plink2Qc**: Performs a standard suite of quality control checks on the final PLINK2 dataset, including sample/variant missingness, allele frequency, HWE, heterozygosity, and kinship.
@@ -57,30 +58,52 @@ new cohort rather than overwriting an existing one.
 ### Rolling aggregate & two-phase run
 Aggregate datasets are registered against a **super cohort** (previous aggregate SGs + new
 plate SGs) so downstream consumers (e.g. the genomic atlas) can query array data by cohort.
-cpg-flow cannot create or validate a cohort mid-run, so the pipeline runs in two phases:
+cpg-flow cannot create or validate a cohort mid-run — a cohort must exist before the DAG is
+built — so the pipeline runs as two chained analysis-runner runs with separate entry points:
 
-1. **Phase 1** — run against the **new plate cohorts** (`input_cohorts=[new plates]`,
-   `config_phase1.toml`). Produces and registers the per-plate `array_cohort_bed` and
-   `array_bafregress` outputs.
-2. **Create the super cohort** manually in Swagger (previous aggregate SGs ∪ new plate SGs).
-3. **Phase 2** — run against the **super cohort** (`input_cohorts=[super]`,
-   `config_phase2.toml`). Rolls the previous aggregate forward and merges only the new plates.
+1. **Phase 1 (`first_workflow`)** — run against the **new plate cohorts**
+   (`input_cohorts=[new plates]`, `config_phase1.toml`). Produces and registers the per-plate
+   `array_cohort_bed` and `array_bafregress` outputs. The final `SubmitPhase2` stage then, in
+   a batch job: creates the super cohort (previous aggregate SGs ∪ this run's plate SGs,
+   reusing an existing cohort with identical membership rather than duplicating it) and
+   submits phase 2 against it. The hand-off works because the cohort is created at batch
+   runtime, before the phase-2 driver builds its DAG. The job POSTs to the analysis-runner
+   server directly and fails loudly on any HTTP error (the `run_analysis_runner` helper
+   swallows them).
+2. **Phase 2 (`second_workflow`)** — runs against the **super cohort**
+   (`input_cohorts=[super]`, set automatically by `SubmitPhase2`; `config_phase2.toml` for a
+   manual run). Rolls the previous aggregate forward and merges only the new plates.
 
 Every stage is a `CohortStage`, so nothing in the stage graph itself separates the phases: a
 phase-2 submission would otherwise also run the per-plate stages on the super cohort, and a
-phase-1 submission would run the aggregate stages once per plate. Each phase config therefore
-pins `workflow.only_stages` to its phase's stages, and `run_workflow.py` refuses to submit when
-`only_stages` is missing or mixes stages from both phases, or when a phase-2 run lists anything
-other than exactly one cohort — a mismatched config fails at submission (in the driver job's
-log), before any job is queued.
+phase-1 submission would run the aggregate stages once per plate. The split entry points are
+what pin each submission to its phase's stages. Each entry point additionally rejects a
+`workflow.only_stages` selection naming stages outside its phase (cpg-flow skips stages by
+exact name match, so a typo or other-phase name would be silently skipped), and
+`second_workflow` refuses to run against anything other than exactly one cohort (the super
+cohort) — a mismatched config fails at submission (in the driver job's log), before any job
+is queued.
+
+To accumulate plates across several phase-1 runs before a single aggregation, set
+`workflow.last_stages = ['BafRegress', 'CohortBcfToPlink']` on the early runs so only the
+final one hands off to phase 2. Phase 2 can also be launched manually against a hand-made
+super cohort.
+
+The hand-off is guarded on both sides: cohort creation fails if the created cohort is
+missing any requested SG (rather than shipping a quietly smaller cohort), and the
+submission record is written *before* the phase-2 submission so a re-run of phase 1 can
+never submit phase 2 twice (the job also refuses at runtime if the record already exists).
+If the submission itself fails, delete the sentinel TOML at
+`<dataset prefix>/popgen_genotyping/SubmitPhase2/<workflow.version>/<multicohort-name>_phase2_submitted.toml`
+and re-run phase 1 — the created cohort is found by membership and reused. Keep
+`check_expected_outputs = true`: the existing sentinel is what skips the stage on re-run.
 
 The previous aggregate is selected explicitly by **cohort ID** (`previous_aggregate_cohort_id`).
 The new plates are **not listed** in phase-2 config — they are **derived**
 (`NEW = super − previous aggregate`), and each new SG is resolved to its plate via the registered
 `array_cohort_bed` analysis. The resolved plan (the contributing plate cohorts and their new-SG
-counts) is printed to the driver log at submission: **confirm the plates match what you ran in
-phase 1** before letting the run proceed. Use `scripts/list_aggregates.py` to pick the previous
-aggregate cohort.
+counts) is printed to the phase-2 driver log: check the plates match what you ran in phase 1.
+Use `scripts/list_aggregates.py` to pick the previous aggregate cohort.
 
 **Why derive the new plates instead of reusing the phase-1 plate list?** It might look simpler to
 just carry the plate cohorts forward from phase 1, but deriving from the super cohort's membership
@@ -95,8 +118,9 @@ keeps that cohort the single source of truth and is robust to things a hand-carr
   the post-`--keep` kept-sample-count assert plus the per-SG coverage check catch any plate
   never run through phase 1, failing loudly instead of producing a silently short aggregate.
 
-The plan printout is what makes the derivation trustworthy: you get to eyeball the derived plate
-set against your phase-1 runs rather than trusting it blind.
+With the automatic hand-off the plan printout is a post-hoc audit rather than a gate; the hard
+guarantee is the merge-time membership assert below, which fails the run outright on any
+disagreement.
 
 The final `plink --keep` trims the merged fileset to super-cohort membership (`merged ⊆ super`) and
 asserts the kept-sample count equals the super cohort (`super ⊆ merged`) before the aggregate is
@@ -125,8 +149,9 @@ The pipeline is configured using a TOML file, one per phase: start from
     - `dataset`: The analysis dataset for the output.
     - `input_cohorts`: A list of cohort IDs to include in the run — the new plate cohorts in
       phase 1, exactly the super cohort in phase 2.
-    - `only_stages`: The stages belonging to the phase being run. Mandatory; a submission
-      that omits it or mixes stages from both phases is rejected (see
+    - `only_stages` (optional): A within-phase subset to re-run (e.g. just `QcReport`).
+      The entry point pins the phase's stage list; a selection naming stages outside the
+      phase is rejected (see
       [Rolling aggregate & two-phase run](#rolling-aggregate--two-phase-run)).
     - `sequencing_type`: Must be set to `array`.
     - `driver_image`: The Docker image for the main `cpg-flow` driver.
@@ -137,27 +162,44 @@ The pipeline is configured using a TOML file, one per phase: start from
     - `egt_cluster_path`: Path to the Illumina EGT cluster file.
     - `af_ref_path` (optional): Path to a VCF containing population allele frequencies for `BafRegress`.
 - `[popgen_genotyping.merge_cohort_plink]`:
-    - `previous_aggregate_cohort_id` (optional): The Metamist **cohort ID** of a previous aggregate to roll forward. Omit for a from-scratch (bootstrap) build. Use `scripts/list_aggregates.py` to list registered aggregate cohorts and pick one. See [Rolling aggregate & two-phase run](#rolling-aggregate--two-phase-run).
+    - `previous_aggregate_cohort_id` (required): The Metamist **cohort ID** of a previous aggregate to roll forward, or the literal `'bootstrap'` to declare a from-scratch build. There is no default: a forgotten entry fails the run rather than silently building a new-plates-only aggregate. Used by `SubmitPhase2` (super-cohort membership) and `MergeCohortPlink` (carried aggregate), so the two phases cannot drift. Use `scripts/list_aggregates.py` to list registered aggregate cohorts and pick one. See [Rolling aggregate & two-phase run](#rolling-aggregate--two-phase-run).
+- `[popgen_genotyping.submit_phase2]`:
+    - `super_cohort_name` (required for phase 1): Name for the super cohort `SubmitPhase2` creates. Must not collide with an existing cohort name; ignored when a cohort with identical membership already exists (it is reused).
 
 ## Execution
-To run the pipeline, use the `analysis-runner` command. You will need to specify the path to your configuration file, the output directory, and the script to execute.
+Launch phase 1 with the `analysis-runner` command against this repo's image (the phase-2 run
+is submitted automatically):
 
 From the repo root:
 
 ```bash
 analysis-runner \
+    --skip-repo-checkout \
+    --image australia-southeast1-docker.pkg.dev/cpg-common/images/popgen_genotyping:0.1.0-28 \
     --dataset <your-dataset> \
-    --access-level <access-level> \
+    --access-level full \
     --output-dir <output-directory> \
-    --description 'popgen genotyping phase 1' \
     --config src/popgen_genotyping/config_phase1.toml \
-    src/popgen_genotyping/run_workflow.py
+    --description 'popgen genotyping phase 1' \
+    first_workflow
 ```
 
-For phase 2, swap in `config_phase2.toml` (and a matching description). Note the phase
-validation and the merge-plan printout run on the **driver job**, after `analysis-runner`
-has already returned — check the driver batch's log for the plan (phase 2) or for the
-ValueError if the config's `only_stages` was rejected.
+The image must match `workflow.driver_image` in the config; nothing validates this, so be
+precise about which value governs what: the phase-1 driver runs in the CLI `--image`, while
+the `SubmitPhase2` job and the whole of phase 2 use `workflow.driver_image` from the config —
+if they drift, the two phases run different code. Pin an exact tag, never `:latest`: phase 2
+resolves the image string at its own start, so a floating tag can also run the two phases on
+different code. CI builds a new `<VERSION>-<n>` tag on every merge to main; list them with:
+
+```bash
+gcloud artifacts docker tags list australia-southeast1-docker.pkg.dev/cpg-common/images/popgen_genotyping
+```
+
+To run phase 2 manually against an existing super cohort, swap in `config_phase2.toml` with
+`workflow.input_cohorts = [<super cohort ID>]` (and a matching description) and substitute
+`second_workflow` above. Note the submission-time checks and the merge-plan printout run on
+the **driver job**, after `analysis-runner` has already returned — check the driver batch's
+log for the plan (phase 2) or for the ValueError if the config was rejected.
 
 ## Local Development & Testing
 This repository includes scripts for local development and testing.

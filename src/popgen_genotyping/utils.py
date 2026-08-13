@@ -47,6 +47,59 @@ def get_output_prefix(dataset: Dataset, stage_name: str, tmp: bool = False, vers
     return stage_prefix / str(version)
 
 
+def get_previous_aggregate_cohort_id() -> str | None:
+    """
+    Read the previous aggregate cohort ID from config, with bootstrap made explicit.
+
+    The key is required so a forgotten config entry cannot silently build a
+    new-plates-only aggregate: a from-scratch build must be declared with the literal
+    'bootstrap' (returns None); any other value must be a Metamist cohort ID.
+
+    Returns:
+        str | None: The cohort ID to roll forward, or None for a declared bootstrap.
+
+    Raises:
+        ConfigError: If the key is missing from config.
+        ValueError: If the value is neither a cohort ID (COH...) nor 'bootstrap'.
+    """
+    value: str = config_retrieve(['popgen_genotyping', 'merge_cohort_plink', 'previous_aggregate_cohort_id'])
+    if value == 'bootstrap':
+        return None
+    if not isinstance(value, str) or not value.startswith('COH'):
+        raise ValueError(
+            f"previous_aggregate_cohort_id must be a cohort ID (COH...) or the literal 'bootstrap', got {value!r}"
+        )
+    return value
+
+
+def validate_only_stages(only_stages: list[str], phase_stages: list, entry_point: str) -> None:
+    """
+    Reject a ``workflow.only_stages`` selection naming stages this entry point does not run.
+
+    Each phase has its own entry point with a fixed stage list, so ``only_stages`` is only
+    ever a within-phase subset (e.g. re-running just the QC report). cpg-flow skips stages
+    by exact name match, so a typo, a wrong-cased name, or a stage from the other phase
+    would otherwise be silently skipped while the rest of the selection runs.
+
+    Args:
+        only_stages (list[str]): The ``workflow.only_stages`` config value; empty runs
+            every stage of the phase.
+        phase_stages (list): The stage classes this entry point submits.
+        entry_point (str): The entry-point name, for the error message.
+
+    Raises:
+        ValueError: If ``only_stages`` names a stage outside this entry point's phase.
+    """
+    known = {cls.__name__ for cls in phase_stages}
+    unknown = set(only_stages) - known
+    if unknown:
+        raise ValueError(
+            f'workflow.only_stages names stages {sorted(unknown)} that {entry_point} does not run; '
+            f'its stages are {sorted(known)} (exact case). The phases run against different cohorts '
+            '(new plates vs the super cohort) and each has its own entry point — see the README.'
+        )
+
+
 def get_sequencing_group_cohort(sequencing_group: SequencingGroup) -> Cohort:
     """
     Resolve the cohort a sequencing group belongs to by searching the multi-cohort.

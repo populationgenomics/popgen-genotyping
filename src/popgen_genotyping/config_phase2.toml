@@ -1,8 +1,9 @@
-# Phase 2: aggregation. Run against the super cohort created manually in
-# Swagger between the phases (previous aggregate SGs + new plate SGs). Rolls
-# the previous aggregate forward, merges the new plates, and registers the
-# aggregate and QC outputs against the super cohort. See "Rolling aggregate &
-# two-phase run" in the README.
+# Phase 2: aggregation. Run against the super cohort (previous aggregate SGs +
+# new plate SGs) — normally created and submitted automatically by phase 1's
+# SubmitPhase2 stage; use this config for a manual phase-2 run (second_workflow)
+# against an existing super cohort. Rolls the previous aggregate forward, merges
+# the new plates, and registers the aggregate and QC outputs against the super
+# cohort. See "Rolling aggregate & two-phase run" in the README.
 [workflow]
 name = 'popgen_genotyping'
 
@@ -12,16 +13,8 @@ dataset = 'ourdna'
 input_cohorts = ['COH200']
 sequencing_type = 'array'
 
-# Pin this run to the phase-2 (aggregate) stages. run_workflow.py refuses to
-# submit when only_stages is missing or mixes stages from both phases.
-only_stages = [
-    'MergeCohortPlink',
-    'ExportCohortDatasets',
-    'Plink2Qc',
-    'KingIbdseg',
-    'SnpQcReport',
-    'QcReport',
-]
+# The second_workflow entry point pins this run to the phase-2 stages; set
+# only_stages only for a within-phase subset (e.g. re-running just the QC report).
 
 # used to make sure we don't repeat previously completed stages
 check_expected_outputs = true
@@ -29,7 +22,12 @@ check_expected_outputs = true
 # the method to register outputs, can be missing - will not generate metamist analysis entries
 status_reporter = 'metamist'
 
-driver_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/cpg_flow:latest'
+# TODO(you): set to the current tag of this repo's own image — the phase-2 driver runs
+# in it and needs the popgen_genotyping package. An automatic hand-off forwards phase 1's
+# driver_image instead of reading this file; pin an exact tag, never ':latest'. CI builds
+# a new tag on every merge to main; list them with:
+#   gcloud artifacts docker tags list australia-southeast1-docker.pkg.dev/cpg-common/images/popgen_genotyping
+driver_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/popgen_genotyping:0.1.0-28'
 bcftools_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/bcftools:1.23-1'
 plink_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/plink:1.9-20250819-PLINK-2.0-20260228-1'
 king_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/king:2.3.2-1'
@@ -39,8 +37,10 @@ version = 1
 cpu = 4
 memory = 'highmem'
 storage = '100G'
-# The Metamist cohort ID of the previous aggregate to roll forward.
-# Omit for a from-scratch (bootstrap) build. Use scripts/list_aggregates.py to pick one.
+# TODO(you): uncomment and set. Required: the Metamist cohort ID of the previous
+# aggregate to roll forward, or the literal 'bootstrap' to declare a from-scratch build.
+# There is no default, so a forgotten entry fails the run instead of silently building a
+# new-plates-only aggregate. Use scripts/list_aggregates.py to pick a cohort ID.
 # previous_aggregate_cohort_id = 'COH123'
 
 [popgen_genotyping.export_cohort_datasets]

@@ -4,12 +4,16 @@ Metamist GraphQL query utilities for the genotyping pipeline.
 
 import csv
 import functools
+import time
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 
 from cpg_utils import to_path
+from loguru import logger
 from cpg_utils.config import config_retrieve
+from metamist.apis import CohortApi
 from metamist.graphql import gql, query
+from metamist.models import BodyCreateCohortFromCriteria, CohortBody, CohortCriteria
 
 from popgen_genotyping.utils import get_sequencing_group_cohort
 
@@ -77,6 +81,26 @@ QUERY_COHORTS_WITH_ANALYSES = gql(
 )
 
 
+def metamist_project(project: str | None = None) -> str:
+    """
+    Resolve the namespaced Metamist project name for the current run.
+
+    Args:
+        project (str, optional): Metamist project name. Defaults to the 'dataset' from config.
+
+    Returns:
+        str: The project name, with a -test suffix at test access level.
+    """
+    if project is None:
+        project = config_retrieve(['workflow', 'dataset'])
+
+    # At test access level the namespaced Metamist project carries a -test suffix.
+    if config_retrieve(['workflow', 'access_level']) == 'test' and 'test' not in project:
+        project += '-test'
+
+    return project
+
+
 def query_genotyping_manifests(project: str | None = None) -> list[dict[str, Any]]:
     """
     Query Metamist for genotyping manifest analyses.
@@ -87,12 +111,7 @@ def query_genotyping_manifests(project: str | None = None) -> list[dict[str, Any
     Returns:
         list[dict[str, Any]]: List of 'outputs' dictionaries from manifest analyses.
     """
-    if project is None:
-        project = config_retrieve(['workflow', 'dataset'])
-
-    # At test access level the namespaced Metamist project carries a -test suffix.
-    if config_retrieve(['workflow', 'access_level']) == 'test' and 'test' not in project:
-        project += '-test'
+    project = metamist_project(project)
 
     # Execute the query
     query_result: dict[str, Any] = query(QUERY_GENOTYPING_MANIFESTS, {'project': project})
@@ -257,12 +276,7 @@ def query_reported_sex(project: str | None = None) -> dict[str, str]:
     Returns:
         dict[str, str]: Mapping of Sequencing Group ID to reported sex.
     """
-    if project is None:
-        project = config_retrieve(['workflow', 'dataset'])
-
-    # At test access level the namespaced Metamist project carries a -test suffix.
-    if config_retrieve(['workflow', 'access_level']) == 'test' and 'test' not in project:
-        project += '-test'
+    project = metamist_project(project)
 
     # Execute the query
     query_result: dict[str, Any] = query(QUERY_REPORTED_SEX, {'project': project})
@@ -322,17 +336,58 @@ def query_cohorts_with_analyses(project: str | None = None) -> list[dict[str, An
         list[dict[str, Any]]: Cohort dicts, each with 'id', 'name', 'sequencingGroups'
             and 'analyses'. Empty list if the project has no cohorts.
     """
-    if project is None:
-        project = config_retrieve(['workflow', 'dataset'])
-
-    # At test access level the namespaced Metamist project carries a -test suffix.
-    if config_retrieve(['workflow', 'access_level']) == 'test' and 'test' not in project:
-        project += '-test'
+    project = metamist_project(project)
 
     query_result: dict[str, Any] = query(QUERY_COHORTS_WITH_ANALYSES, {'project': project})
 
     project_result = query_result.get('project') or {}
     return project_result.get('cohorts') or []
+
+
+def wait_for_cohort_analyses(
+    cohort_ids: Iterable[str],
+    analysis_types: Iterable[str],
+    project: str | None = None,
+    timeout_seconds: float = 900,
+    poll_seconds: float = 30,
+) -> None:
+    """
+    Block until every cohort has a registered analysis of every requested type.
+
+    cpg-flow's Metamist registration jobs are not stage dependencies (the status
+    reporter creates them but never adds them to the stage's output jobs), so a job
+    that consumes registered analyses can start while registration is still in flight.
+    Polling closes that race; the deadline keeps a genuinely failed registration loud.
+
+    Args:
+        cohort_ids (Iterable[str]): Cohorts whose analyses must exist.
+        analysis_types (Iterable[str]): Analysis types required on every cohort.
+        project (str, optional): Metamist project name. Defaults to the 'dataset' from config.
+        timeout_seconds (float): Deadline before giving up. Defaults to 900.
+        poll_seconds (float): Delay between Metamist queries. Defaults to 30.
+
+    Raises:
+        TimeoutError: If any (cohort, analysis type) pair is still unregistered at the deadline.
+    """
+    ids = list(cohort_ids)
+    types = list(analysis_types)
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        by_id = {c.get('id'): c for c in query_cohorts_with_analyses(project)}
+        missing = [
+            (cohort_id, analysis_type)
+            for cohort_id in ids
+            for analysis_type in types
+            if not any(a.get('type') == analysis_type for a in ((by_id.get(cohort_id) or {}).get('analyses') or []))
+        ]
+        if not missing:
+            return
+        if time.monotonic() >= deadline:
+            raise TimeoutError(
+                f'Timed out after {timeout_seconds}s waiting for Metamist analysis registration: {missing}'
+            )
+        logger.info(f'Waiting for {len(missing)} Metamist analysis registration(s): {missing}')
+        time.sleep(poll_seconds)
 
 
 def _invert_cohort_analyses(cohorts: list[dict[str, Any]], analysis_type: str) -> dict[str, dict[str, str]]:
@@ -620,3 +675,131 @@ def format_merge_plan(resolved: dict[str, Any], previous_aggregate_cohort_id: st
         lines.append(f'       {plate["cohort_id"]}:  {plate["new_count"]} new SGs')
     lines.append(f'  expected merged total: {expected_total} SGs')
     return '\n'.join(lines)
+
+
+def resolve_super_cohort_membership(
+    plate_sg_ids: Iterable[str],
+    previous_aggregate_cohort_id: str | None,
+    project: str | None = None,
+    cohorts: list[dict[str, Any]] | None = None,
+) -> list[str]:
+    """
+    Compute the target super-cohort membership for a phase-2 run.
+
+    The super cohort is the union of this phase-1 run's plate SGs and the previous
+    aggregate cohort's current membership (so SGs withdrawn from the previous aggregate
+    cohort since it was built are excluded automatically).
+
+    Args:
+        plate_sg_ids (Iterable[str]): SGs of the phase-1 plate cohorts.
+        previous_aggregate_cohort_id (str, optional): Cohort ID of the previous aggregate,
+            or None for a from-scratch (bootstrap) build.
+        project (str, optional): Metamist project name. Defaults to the 'dataset' from config.
+        cohorts (list[dict[str, Any]], optional): Pre-fetched cohort records.
+
+    Returns:
+        list[str]: Sorted super-cohort SG IDs.
+
+    Raises:
+        ValueError: If the previous aggregate cohort is not found in the project, or if
+            every plate SG is already a member of it (nothing new to aggregate).
+    """
+    sg_ids: set[str] = set(plate_sg_ids)
+
+    if previous_aggregate_cohort_id:
+        if cohorts is None:
+            cohorts = query_cohorts_with_analyses(project)
+        agg_cohort = next((c for c in cohorts if c.get('id') == previous_aggregate_cohort_id), None)
+        if agg_cohort is None:
+            raise ValueError(f'Previous aggregate cohort {previous_aggregate_cohort_id} not found in project')
+        agg_sg_ids = {sg['id'] for sg in (agg_cohort.get('sequencingGroups') or []) if sg.get('id')}
+        # A super cohort identical to the previous aggregate would send phase 2 chasing
+        # an empty new-SG set; fail here with the real reason instead.
+        if sg_ids <= agg_sg_ids:
+            raise ValueError(
+                f'All {len(sg_ids)} plate SGs are already members of previous aggregate cohort '
+                f'{previous_aggregate_cohort_id}; nothing new to aggregate'
+            )
+        sg_ids |= agg_sg_ids
+
+    return sorted(sg_ids)
+
+
+def find_cohort_by_membership(
+    sg_ids: Iterable[str],
+    project: str | None = None,
+    cohorts: list[dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
+    """
+    Find an existing cohort whose membership is exactly ``sg_ids``.
+
+    Used to make super-cohort creation idempotent: a re-run of phase 1 (e.g. after a
+    failed phase-2 submission) reuses the cohort it created last time instead of
+    registering a duplicate.
+
+    Args:
+        sg_ids (Iterable[str]): The target membership.
+        project (str, optional): Metamist project name. Defaults to the 'dataset' from config.
+        cohorts (list[dict[str, Any]], optional): Pre-fetched cohort records.
+
+    Returns:
+        dict[str, Any] | None: The matching cohort record (latest by ID if several
+            share the membership), or None.
+    """
+    if cohorts is None:
+        cohorts = query_cohorts_with_analyses(project)
+
+    target: set[str] = set(sg_ids)
+    matches = [c for c in cohorts if {sg['id'] for sg in (c.get('sequencingGroups') or []) if sg.get('id')} == target]
+    if not matches:
+        return None
+    # Cohort IDs are 'COH' + an unpadded integer (+ check digit), so 'latest' must
+    # compare numerically: lexicographic max would rank COH99 above COH100.
+    return max(matches, key=lambda c: int(str(c.get('id', '')).removeprefix('COH')))
+
+
+def create_custom_cohort(name: str, description: str, sg_ids: Iterable[str], project: str | None = None) -> str:
+    """
+    Create a custom Metamist cohort from explicit sequencing group IDs.
+
+    Args:
+        name (str): Cohort name (must not collide with an existing cohort).
+        description (str): Cohort description (provenance: source plates, previous aggregate).
+        sg_ids (Iterable[str]): The cohort membership.
+        project (str, optional): Metamist project name. Defaults to the 'dataset' from config.
+
+    Returns:
+        str: The new cohort ID.
+
+    Raises:
+        ValueError: If the created cohort is missing any requested SG (the cohort would
+            be silently smaller than intended), or Metamist did not return a cohort ID.
+    """
+    project = metamist_project(project)
+
+    requested = sorted(sg_ids)
+    body = BodyCreateCohortFromCriteria(
+        cohort_spec=CohortBody(name=name, description=description),
+        # sg_ids_internal must be the sole criterion: the server rejects an explicit SG
+        # list combined with any other criterion, including projects (metamist SET-839).
+        cohort_criteria=CohortCriteria(sg_ids_internal=requested),
+    )
+    result = CohortApi().create_cohort_from_criteria(project=project, body_create_cohort_from_criteria=body)
+
+    def _field(key: str) -> Any:
+        return result.get(key) if isinstance(result, dict) else getattr(result, key, None)
+
+    cohort_id = _field('cohort_id')
+    if not cohort_id:
+        raise ValueError(f'Cohort creation for {name!r} returned no cohort ID: {result}')
+
+    # Current Metamist raises on inactive SGs, but a cohort whose membership differs
+    # from the request would ship a wrong aggregate, so verify the created membership
+    # regardless of server version.
+    created = set(_field('sequencing_group_ids') or [])
+    missing = sorted(set(requested) - created)
+    if missing:
+        raise ValueError(
+            f'Cohort {name!r} ({cohort_id}) is missing {len(missing)} requested sequencing group(s): {missing}'
+        )
+    return str(cohort_id)
