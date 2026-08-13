@@ -4,7 +4,6 @@ This file exists to define all the Stages for the workflow.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from cpg_flow.stage import CohortStage, stage
@@ -281,14 +280,16 @@ class ExportCohortDatasets(CohortStage):
         Define the expected PLINK2 outputs to long-term storage.
         BCF output goes to tmp for analysis, as it is too large for long term storage.
         """
+        # No datestamp: the cohort ID (plus the versioned prefix) already distinguishes
+        # aggregates, and paths must be stable across days for skip-if-exists and
+        # single-stage reruns to find upstream outputs. Same for all phase-2 stages.
         prefix: Path = get_output_prefix(dataset=cohort.dataset, stage_name=self.name)
         tmp_bcf_prefix: Path = get_output_prefix(dataset=cohort.dataset, stage_name=self.name, tmp=True)
-        datestamp: str = datetime.now(tz=timezone.utc).strftime('%Y%m%d')
         return {
-            'pgen': prefix / f'{cohort.id}_{datestamp}.pgen',
-            'pvar': prefix / f'{cohort.id}_{datestamp}.pvar',
-            'psam': prefix / f'{cohort.id}_{datestamp}.psam',
-            'bcf': tmp_bcf_prefix / f'{cohort.id}_{datestamp}.bcf',
+            'pgen': prefix / f'{cohort.id}.pgen',
+            'pvar': prefix / f'{cohort.id}.pvar',
+            'psam': prefix / f'{cohort.id}.psam',
+            'bcf': tmp_bcf_prefix / f'{cohort.id}.bcf',
         }
 
     def queue_jobs(self, cohort: Cohort, inputs: StageInput) -> StageOutput:
@@ -328,8 +329,7 @@ class Plink2Qc(CohortStage):
         Define the expected PLINK2 QC output files for the cohort.
         """
         prefix: Path = get_output_prefix(dataset=cohort.dataset, stage_name=self.name)
-        datestamp: str = datetime.now(tz=timezone.utc).strftime('%Y%m%d')
-        output_base_name = f'{cohort.id}_{datestamp}_qc'
+        output_base_name = f'{cohort.id}_qc'
         return {
             'smiss': prefix / f'{output_base_name}.smiss',
             'afreq': prefix / f'{output_base_name}.afreq',
@@ -381,8 +381,7 @@ class KingIbdseg(CohortStage):
         when the input has no chrX, so these outputs are always materialised.
         """
         prefix: Path = get_output_prefix(dataset=cohort.dataset, stage_name=self.name)
-        datestamp: str = datetime.now(tz=timezone.utc).strftime('%Y%m%d')
-        output_base_name = f'{cohort.id}_{datestamp}_king'
+        output_base_name = f'{cohort.id}_king'
         return {
             'seg': prefix / f'{output_base_name}.seg',
             'segments': prefix / f'{output_base_name}.segments.gz',
@@ -438,11 +437,10 @@ class SnpQcReport(CohortStage):
         Define the audit TSV, inclusion list, and summary TSV outputs.
         """
         prefix: Path = get_output_prefix(dataset=cohort.dataset, stage_name=self.name)
-        datestamp: str = datetime.now(tz=timezone.utc).strftime('%Y%m%d')
         return {
-            'audit_tsv': prefix / f'{cohort.id}_{datestamp}_snp_qc.audit.tsv.gz',
-            'inclusion_list': prefix / f'{cohort.id}_{datestamp}_snp_qc.include.snplist',
-            'summary_tsv': prefix / f'{cohort.id}_{datestamp}_snp_qc.summary.tsv',
+            'audit_tsv': prefix / f'{cohort.id}_snp_qc.audit.tsv.gz',
+            'inclusion_list': prefix / f'{cohort.id}_snp_qc.include.snplist',
+            'summary_tsv': prefix / f'{cohort.id}_snp_qc.summary.tsv',
         }
 
     def queue_jobs(self, cohort: Cohort, inputs: StageInput) -> StageOutput:
@@ -512,8 +510,7 @@ class QcReport(CohortStage):
         Define the expected QC report output file for the cohort.
         """
         prefix: Path = get_output_prefix(dataset=cohort.dataset, stage_name=self.name)
-        datestamp: str = datetime.now(tz=timezone.utc).strftime('%Y%m%d')
-        return prefix / f'{cohort.id}_{datestamp}_qc_report.csv'
+        return prefix / f'{cohort.id}_qc_report.csv'
 
     def queue_jobs(self, cohort: Cohort, inputs: StageInput) -> StageOutput:
         """

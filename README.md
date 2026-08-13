@@ -49,8 +49,9 @@ Every stage is a `CohortStage`, so nothing in the stage graph itself separates t
 phase-2 submission would otherwise also run the per-plate stages on the super cohort, and a
 phase-1 submission would run the aggregate stages once per plate. Each phase config therefore
 pins `workflow.only_stages` to its phase's stages, and `run_workflow.py` refuses to submit when
-`only_stages` is missing or mixes stages from both phases — a mismatched config fails at
-submission, before any job is queued.
+`only_stages` is missing or mixes stages from both phases, or when a phase-2 run lists anything
+other than exactly one cohort — a mismatched config fails at submission (in the driver job's
+log), before any job is queued.
 
 The previous aggregate is selected explicitly by **cohort ID** (`previous_aggregate_cohort_id`).
 The new plates are **not listed** in phase-2 config — they are **derived**
@@ -81,9 +82,11 @@ asserts the kept-sample count equals the super cohort (`super ⊆ merged`) befor
 registered, so the released dataset cannot silently disagree with the cohort it registers against.
 
 All phase-2 output filenames embed the super-cohort ID (e.g. `<cohort_id>_merged.bed`,
-`<cohort_id>_<date>.pgen`). Every rolling aggregate gets a new super cohort, so successive
+`<cohort_id>.pgen`). Every rolling aggregate gets a new super cohort, so successive
 aggregates at the same `workflow.version` land on distinct paths — cpg-flow's skip-if-exists
-can therefore never reuse a previous super cohort's merge for a new one.
+can therefore never reuse a previous super cohort's merge for a new one. The filenames carry
+no datestamp: paths are stable across days, so an interrupted phase 2 can be resumed (or a
+single stage re-run with `only_stages`) later without recomputing everything upstream.
 
 ## Prerequisites
 Before running the pipeline, ensure you have the following tools installed and configured:
