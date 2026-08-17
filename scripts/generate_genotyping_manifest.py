@@ -181,17 +181,30 @@ def build_manifest_rows(
 
 def check_gtcs_exist(rows: list[dict[str, str]]) -> None:
     """
-    Verify every row's GTC file exists in GCS.
+    Verify every row's GTC file exists in GCS and is non-empty.
 
     Args:
         rows (list[dict[str, str]]): Manifest rows from ``build_manifest_rows``.
 
     Raises:
-        ValueError: If any GTC file is missing, listing every missing path.
+        ValueError: If any GTC file is missing or zero bytes, listing every bad path.
     """
-    missing: list[str] = [row['cpg_gcp_filepath'] for row in rows if not to_path(row['cpg_gcp_filepath']).exists()]
+    missing: list[str] = []
+    empty: list[str] = []
+    for row in rows:
+        path = to_path(row['cpg_gcp_filepath'])
+        if not path.exists():
+            missing.append(row['cpg_gcp_filepath'])
+        elif path.stat().st_size == 0:
+            empty.append(row['cpg_gcp_filepath'])
+
+    problems: list[str] = []
     if missing:
-        raise ValueError(f'{len(missing)} GTC file(s) not found:\n' + '\n'.join(missing))
+        problems.append(f'{len(missing)} GTC file(s) not found:\n' + '\n'.join(missing))
+    if empty:
+        problems.append(f'{len(empty)} GTC file(s) are zero bytes:\n' + '\n'.join(empty))
+    if problems:
+        raise ValueError('\n'.join(problems))
 
 
 def render_manifest_csv(rows: list[dict[str, str]]) -> str:
