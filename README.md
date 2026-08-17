@@ -128,7 +128,8 @@ The pipeline is configured using a TOML file, one per phase: start from
     - `only_stages`: The stages belonging to the phase being run. Mandatory; a submission
       that omits it or mixes stages from both phases is rejected (see
       [Rolling aggregate & two-phase run](#rolling-aggregate--two-phase-run)).
-    - `sequencing_type`: Must be set to `array`.
+    - `sequencing_type`: Must be set to `genotypingarray` (the sequencing-group type; also
+      the output-path subdirectory under the dataset bucket).
     - `driver_image`: The Docker image for the main `cpg-flow` driver. Use this repository's
       image (`popgen_genotyping:latest`, built by CI from `main`), which has `cpg-flow` and
       this package installed. Pass the same image to `analysis-runner --image` — this config

@@ -9,7 +9,7 @@ name = 'popgen_genotyping'
 dataset = 'ourdna'
 # The new plate cohorts to process (one or more).
 input_cohorts = ['COH101', 'COH102']
-sequencing_type = 'array'
+sequencing_type = 'genotypingarray'
 
 # Pin this run to the phase-1 (per-plate) stages. run_workflow.py refuses to
 # submit when only_stages is missing or mixes stages from both phases.
