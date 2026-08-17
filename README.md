@@ -129,7 +129,10 @@ The pipeline is configured using a TOML file, one per phase: start from
       that omits it or mixes stages from both phases is rejected (see
       [Rolling aggregate & two-phase run](#rolling-aggregate--two-phase-run)).
     - `sequencing_type`: Must be set to `array`.
-    - `driver_image`: The Docker image for the main `cpg-flow` driver.
+    - `driver_image`: The Docker image for the main `cpg-flow` driver. Use this repository's
+      image (`popgen_genotyping:latest`, built by CI from `main`), which has `cpg-flow` and
+      this package installed. Pass the same image to `analysis-runner --image` — this config
+      key does not set the image the analysis-runner driver job itself runs in.
     - `bcftools_image`, `plink_image`, `king_image`: Docker images for the respective tools.
 - `[popgen_genotyping.references]`:
     - `fasta_ref_path`: Path to the human genome FASTA reference.
@@ -148,16 +151,25 @@ From the repo root:
 analysis-runner \
     --dataset <your-dataset> \
     --access-level <access-level> \
+    --image australia-southeast1-docker.pkg.dev/cpg-common/images/popgen_genotyping:latest \
     --output-dir <output-directory> \
     --description 'popgen genotyping phase 1' \
     --config src/popgen_genotyping/config_phase1.toml \
     src/popgen_genotyping/run_workflow.py
 ```
 
+`--image` is required: without it the analysis-runner driver job runs in the default
+analysis-runner image, which has no `cpg-flow`, and the submission fails on import.
+
 For phase 2, swap in `config_phase2.toml` (and a matching description). Note the phase
 validation and the merge-plan printout run on the **driver job**, after `analysis-runner`
 has already returned — check the driver batch's log for the plan (phase 2) or for the
 ValueError if the config's `only_stages` was rejected.
+
+Note for test runs: `Plink2Qc` requires at least 50 samples — plink2 refuses to impute
+allele frequencies for `--het` / `--check-sex` below that. Production plates have 95
+samples so any real aggregate clears it, but a small test super cohort must be sized
+to 50+ SGs for the QC stages to run.
 
 ## Local Development & Testing
 This repository includes scripts for local development and testing.
