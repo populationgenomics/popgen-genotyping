@@ -49,22 +49,6 @@ QUERY_GENOTYPING_MANIFESTS = gql(
     """
 )
 
-# GQL to retrieve previous aggregate metadata and active SGs
-QUERY_PREVIOUS_AGGREGATE = gql(
-    """
-    query PreviousAggregateQuery($id: Int!) {
-      analyses(id: {eq: $id}) {
-        outputs
-        project {
-          sequencingGroups(activeOnly: {eq: true}) {
-            id
-          }
-        }
-      }
-    }
-    """
-)
-
 # GQL to list every cohort in a project with its membership and registered analyses.
 # Analyses register against the cohort (with an empty sequencing_group_ids list), not
 # against individual SGs, so per-SG discovery is impossible — we enumerate cohorts and
@@ -263,37 +247,6 @@ def resolve_gtc_path(sequencing_group: 'SequencingGroup') -> str:
     return mapping[sequencing_group.id]
 
 
-def query_previous_aggregate(analysis_id: int) -> tuple[dict[str, Any], list[str]]:
-    """
-    Query Metamist for a previous aggregate analysis and its project's active samples.
-
-    Args:
-        analysis_id (int): The Metamist analysis ID.
-
-    Returns:
-        tuple[dict[str, Any], list[str]]: (outputs_dict, active_sg_ids)
-
-    Raises:
-        ValueError: If the analysis ID is not found.
-    """
-    query_result: dict[str, Any] = query(QUERY_PREVIOUS_AGGREGATE, {'id': analysis_id})
-
-    if not query_result.get('analyses'):
-        raise ValueError(f'Analysis with ID {analysis_id} not found in Metamist')
-
-    analysis: dict[str, Any] = query_result['analyses'][0]
-    # Outputs only contains the PGEN path, we need to reconstruct PSAM and PVAR paths based on naming convention
-    outputs: dict[str, Any] = {'pgen': analysis.get('outputs', {}).get('path', {})}
-    if not outputs['pgen'] or not outputs['pgen'].endswith('.pgen'):
-        raise ValueError(f'Analysis with ID {analysis_id} does not have a valid PGEN output path')
-    outputs.update({'psam': outputs['pgen'].replace('.pgen', '.psam')})
-    outputs.update({'pvar': outputs['pgen'].replace('.pgen', '.pvar')})
-    project: dict[str, Any] = analysis.get('project', {})
-    active_sgs: list[str] = [sg['id'] for sg in project.get('sequencingGroups', [])]
-
-    return outputs, active_sgs
-
-
 def query_reported_sex(project: str | None = None) -> dict[str, str]:
     """
     Query Metamist for reported sex of participants, mapped to Sequencing Group IDs.
@@ -334,37 +287,6 @@ def query_reported_sex(project: str | None = None) -> dict[str, str]:
             dict_samples[sg_id] = reported_sex
 
     return dict_samples
-
-
-def resolve_rolling_aggregate(prev_analysis_id: int | str) -> tuple[dict[str, str], list[str]]:
-    """
-    Resolve paths and sample delta for a rolling multi-cohort aggregate.
-
-    Args:
-        prev_analysis_id (int | str): The Metamist analysis ID of the previous aggregate.
-
-    Returns:
-        tuple[dict[str, str], list[str]]: (previous_aggregate_paths, samples_to_remove)
-    """
-    # Import here to avoid circular dependency
-    from popgen_genotyping.utils import parse_psam  # noqa: PLC0415
-
-    prev_outputs, active_sg_ids = query_previous_aggregate(int(prev_analysis_id))
-
-    # Expecting PLINK 2.0 PGEN/PVAR/PSAM in outputs
-    previous_aggregate_paths: dict[str, str] = {
-        'pgen': prev_outputs['pgen'],
-        'pvar': prev_outputs['pvar'],
-        'psam': prev_outputs['psam'],
-    }
-
-    # Parse the previous .psam to find all samples that were in the aggregate
-    prev_samples: list[str] = parse_psam(previous_aggregate_paths['psam'])
-
-    # Find samples that are in the previous aggregate but no longer active
-    samples_to_remove: list[str] = list(set(prev_samples) - set(active_sg_ids))
-
-    return previous_aggregate_paths, samples_to_remove
 
 
 def _extract_output_path(outputs: Any) -> str | None:
@@ -660,19 +582,22 @@ def format_merge_plan(resolved: dict[str, Any], previous_aggregate_cohort_id: st
     Render a human-readable summary of a resolved rolling-merge plan for the driver log.
 
     Lets an operator confirm at a glance that phase 2 picked up the phase-1 plates: it
-    lists each contributing plate cohort with its new-SG count, and prints an expected
-    merged total that should equal the super cohort size.
+    lists each contributing plate cohort with its new-SG count. The printed totals are
+    all derived from the super cohort's membership, so they are informational, not a
+    cross-check — the expected merged total equals the super cohort size by construction.
+    The check that the merged data actually matches is the in-job kept-sample-count
+    assert after the final ``--keep``.
 
     Args:
         resolved (dict[str, Any]): The dict returned by :func:`resolve_merge_inputs`.
         previous_aggregate_cohort_id (str, optional): Cohort ID rolled forward, for the header.
 
     Returns:
-        str: A multi-line summary suitable for ``logging.info``.
+        str: A multi-line summary suitable for ``logger.info``.
     """
-    plate_merge_list: list[dict[str, Any]] = resolved.get('plate_merge_list', [])
-    samples_to_remove: list[str] = resolved.get('samples_to_remove', [])
-    super_size: int = resolved.get('super_cohort_size', 0)
+    plate_merge_list: list[dict[str, Any]] = resolved['plate_merge_list']
+    samples_to_remove: list[str] = resolved['samples_to_remove']
+    super_size: int = resolved['super_cohort_size']
 
     new_count: int = sum(p['new_count'] for p in plate_merge_list)
     carried_forward: int = super_size - new_count

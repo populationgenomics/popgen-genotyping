@@ -1,0 +1,53 @@
+# Phase 1: per-plate processing. Run against the new plate cohorts.
+# Produces and registers the per-plate `array_cohort_bed` and `array_bafregress`
+# outputs that phase 2 later discovers via Metamist. See "Rolling aggregate &
+# two-phase run" in the README.
+[workflow]
+name = 'popgen_genotyping'
+
+# mandatory fields for cpg-flow, not populated by analysis-runner
+dataset = 'ourdna'
+# The new plate cohorts to process (one or more).
+input_cohorts = ['COH101', 'COH102']
+sequencing_type = 'array'
+
+# Pin this run to the phase-1 (per-plate) stages. run_workflow.py refuses to
+# submit when only_stages is missing or mixes stages from both phases.
+only_stages = ['GtcToBcfs', 'BafRegress', 'CohortBcfToPlink']
+
+# used to make sure we don't repeat previously completed stages
+check_expected_outputs = true
+
+# the method to register outputs, can be missing - will not generate metamist analysis entries
+status_reporter = 'metamist'
+
+driver_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/cpg_flow:latest'
+bcftools_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/bcftools:1.23-1'
+plink_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/plink:1.9-20250819-PLINK-2.0-20260228-1'
+king_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/king:2.3.2-1'
+version = 1
+
+[popgen_genotyping.gtc_to_bcfs]
+cpu = 2
+memory = 'standard'
+storage = '50G'
+
+[popgen_genotyping.baf_regress]
+cpu = 1
+memory = 'standard'
+storage = '10G'
+
+[popgen_genotyping.cohort_bcf_to_plink]
+cpu = 8
+memory = 'highmem'
+storage = '50G'
+
+[popgen_genotyping.references]
+fasta_ref_path = 'gs://cpg-common-main/references/hg38/v0/Homo_sapiens_assembly38.fasta'
+# Illumina chip manifest + cluster file. These match the GDA chip shipped under
+# gs://cpg-common-main/references/illumina_microarray/; override when running
+# against a different chip / cluster-file revision.
+bpm_manifest_path = 'gs://cpg-common-main/references/illumina_microarray/GDA-8v1-0_D2.bpm'
+egt_cluster_path = 'gs://cpg-common-main/references/illumina_microarray/GDA-8v1-0_D1_ClusterFile.egt'
+# Optional: population allele frequency reference for BAFRegress
+# af_ref_path = 'gs://...'

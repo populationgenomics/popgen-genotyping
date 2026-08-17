@@ -5,7 +5,6 @@ from __future__ import annotations
 import gzip
 import re
 import subprocess
-from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -195,29 +194,25 @@ class TestKingIbdsegExpectedOutputs:
     """Path layout that Metamist `analysis_keys=['seg', 'seg_x']` depends on."""
 
     def test_path_layout_and_naming(self) -> None:
-        """Five outputs under the standard prefix, date-stamped, no dot before X."""
+        """Five outputs under the standard prefix, cohort-keyed, no dot before X."""
         prefix = Path('/cohort/king_ibdseg')
-        mock_multicohort = MagicMock()
+        mock_cohort = MagicMock()
+        mock_cohort.id = 'COH123'
         mock_self = MagicMock()
         mock_self.name = 'KingIbdseg'
-        fixed_now = datetime(2026, 1, 15, tzinfo=timezone.utc)
 
-        with (
-            patch('popgen_genotyping.stages.get_output_prefix', return_value=prefix) as mock_prefix,
-            patch('popgen_genotyping.stages.datetime') as mock_datetime,
-        ):
-            mock_datetime.now.return_value = fixed_now
-            result = KingIbdseg.expected_outputs(mock_self, mock_multicohort)
+        with patch('popgen_genotyping.stages.get_output_prefix', return_value=prefix) as mock_prefix:
+            result = KingIbdseg.expected_outputs(mock_self, mock_cohort)
 
         assert result == {
-            'seg': prefix / '20260115_king.seg',
-            'segments': prefix / '20260115_king.segments.gz',
-            'seg_x': prefix / '20260115_kingX.seg',
-            'segments_x': prefix / '20260115_kingX.segments.gz',
-            'log': prefix / '20260115_king.log',
+            'seg': prefix / 'COH123_king.seg',
+            'segments': prefix / 'COH123_king.segments.gz',
+            'seg_x': prefix / 'COH123_kingX.seg',
+            'segments_x': prefix / 'COH123_kingX.segments.gz',
+            'log': prefix / 'COH123_king.log',
         }
         mock_prefix.assert_called_once_with(
-            dataset=mock_multicohort.analysis_dataset,
+            dataset=mock_cohort.dataset,
             stage_name='KingIbdseg',
         )
 
@@ -230,8 +225,8 @@ class TestKingIbdsegQueueJobs:
 
     def test_passes_merged_plink_and_outputs_to_job(self) -> None:
         """Bed/bim/fam map to bed/bim/fam; the five outputs map to the five job kwargs."""
-        mock_multicohort = MagicMock()
-        mock_multicohort.name = 'my_multicohort'
+        mock_cohort = MagicMock()
+        mock_cohort.name = 'my_cohort'
 
         merged_plink: dict[str, Path] = {
             'bed': Path('/merged/cohort.bed'),
@@ -252,10 +247,10 @@ class TestKingIbdsegQueueJobs:
         mock_self.expected_outputs.return_value = expected_outputs
 
         with patch('popgen_genotyping.stages.run_king_ibdseg') as mock_run:
-            KingIbdseg.queue_jobs(mock_self, mock_multicohort, mock_inputs)
+            KingIbdseg.queue_jobs(mock_self, mock_cohort, mock_inputs)
 
         # Inputs are pulled from the right upstream stage.
-        mock_inputs.as_dict.assert_called_once_with(target=mock_multicohort, stage=MergeCohortPlink)
+        mock_inputs.as_dict.assert_called_once_with(target=mock_cohort, stage=MergeCohortPlink)
 
         # The job factory receives plink inputs and outputs in their named slots
         # -- this is the seam where #24-style cross-wiring would manifest.
@@ -268,13 +263,13 @@ class TestKingIbdsegQueueJobs:
             output_seg_x_path='/out/20260115_kingX.seg',
             output_segments_x_path='/out/20260115_kingX.segments.gz',
             output_log_path='/out/20260115_king.log',
-            job_name='KingIbdseg_my_multicohort',
+            job_name='KingIbdseg_my_cohort',
         )
 
         # The same outputs dict flows through to make_outputs, and the job list
         # returned by run_king_ibdseg (recode + KING) is passed through verbatim.
         mock_self.make_outputs.assert_called_once_with(
-            mock_multicohort,
+            mock_cohort,
             data=expected_outputs,
             jobs=mock_run.return_value,
         )
