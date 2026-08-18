@@ -69,10 +69,12 @@ while [ $i -lt {N_VARIANTS} ]; do
     end=$((i + 99)); [ $end -ge {N_VARIANTS} ] && end=$(({N_VARIANTS} - 1))
     bp1=$(({BASE_BP} + i * {STEP_BP})); bp2=$(({BASE_BP} + end * {STEP_BP}))
     status=$(scan {CHUNK_TIMEOUT} $bp1 $bp2)
+    # Exit 13 is plink2's "no variants remaining after main filters" — a normal
+    # outcome when every variant in the window fails the HWE filter, not a fault.
     if [ "$status" = "124" ]; then
         echo "CHUNK HANG: variants $i-$end"
         hanging_chunks="$hanging_chunks $i"
-    elif [ "$status" != "0" ]; then
+    elif [ "$status" != "0" ] && [ "$status" != "13" ]; then
         echo "CHUNK CRASH (exit $status): variants $i-$end"
         hanging_chunks="$hanging_chunks $i"
     fi
@@ -93,7 +95,7 @@ for chunk in $hanging_chunks; do
     while [ $i -le $end ]; do
         bp=$(({BASE_BP} + i * {STEP_BP}))
         status=$(scan {SINGLE_TIMEOUT} $bp $bp)
-        if [ "$status" != "0" ]; then
+        if [ "$status" != "0" ] && [ "$status" != "13" ]; then
             vid=$(awk -v p=$bp '$2 == p {{print $3}}' synthetic_chrx.pvar)
             [ "$status" = "124" ] && echo "HANG: $vid" || echo "CRASH (exit $status): $vid"
         fi
