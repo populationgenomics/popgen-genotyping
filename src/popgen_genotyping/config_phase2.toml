@@ -10,7 +10,7 @@ name = 'popgen_genotyping'
 dataset = 'ourdna'
 # Exactly one cohort: the manually created super cohort.
 input_cohorts = ['COH200']
-sequencing_type = 'array'
+sequencing_type = 'genotypingarray'
 
 # Pin this run to the phase-2 (aggregate) stages. run_workflow.py refuses to
 # submit when only_stages is missing or mixes stages from both phases.
@@ -29,9 +29,9 @@ check_expected_outputs = true
 # the method to register outputs, can be missing - will not generate metamist analysis entries
 status_reporter = 'metamist'
 
-driver_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/cpg_flow:latest'
+driver_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/popgen_genotyping:latest'
 bcftools_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/bcftools:1.23-1'
-plink_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/plink:1.9-20250819-PLINK-2.0-20260228-1'
+plink_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/plink:1.9-20250819-PLINK-2.0-20260808-1'
 king_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/king:2.3.2-1'
 version = 1
 
