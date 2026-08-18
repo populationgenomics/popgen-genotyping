@@ -112,12 +112,6 @@ def run_snp_qc_report(
         default_cpu=2,
         default_storage='50G',
     )
-    # plink2 a.7.3 AVX2 builds loop forever computing chrX --hwe p-values on this
-    # cohort (a.6.33 AVX2 segfaulted at the same point); the generic x86_64 build
-    # completes the identical command in seconds. Pin the generic build until the
-    # upstream AVX2 bug is fixed. Requires plink image >= 1.9-20250819-PLINK-2.0-20260808-2.
-    hwe_snplist.env('PLINK2_FORCE_VARIANT', 'generic')
-
     merged_pgen = b.read_input_group(
         pgen=merged_pgen_path,
         pvar=merged_pvar_path,

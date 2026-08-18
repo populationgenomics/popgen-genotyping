@@ -21,7 +21,7 @@ from pathlib import Path
 
 from cpg_utils.hail_batch import get_batch
 
-PLINK_IMAGE = 'australia-southeast1-docker.pkg.dev/cpg-common/images/plink:1.9-20250819-PLINK-2.0-20260808-1'
+PLINK_IMAGE = 'australia-southeast1-docker.pkg.dev/cpg-common/images/plink:1.9-20250819-PLINK-2.0-20260818-1'
 TIMEOUT_SECONDS = 300
 
 generator_source = (Path(__file__).parent / 'make_synthetic_chrx.py').read_text()
@@ -61,6 +61,13 @@ for variant in plink2_intel_avx2 plink2_generic; do
         echo "RESULT $variant: OK"
     fi
 done
+
+if cmp -s hwe_plink2_intel_avx2.snplist hwe_plink2_generic.snplist; then
+    echo "RESULT snplist: MATCH ($(wc -l < hwe_plink2_generic.snplist) variants)"
+else
+    echo "RESULT snplist: MISMATCH"
+    diff hwe_plink2_intel_avx2.snplist hwe_plink2_generic.snplist | head -20
+fi
 """
 )
 
