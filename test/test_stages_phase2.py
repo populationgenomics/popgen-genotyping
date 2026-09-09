@@ -181,6 +181,7 @@ class TestQcReportQueueJobs:
             return {
                 (Plink2Qc, 'smiss'): Path('/qc/COH999_20260115_qc.smiss'),
                 (KingIbdseg, 'seg'): Path('/king/COH999_20260115_king.seg'),
+                (KingIbdseg, 'excluded'): Path('/king/COH999_20260115_king.excluded_samples.tsv'),
             }[(stage, key)]
 
         mock_inputs = MagicMock()
@@ -202,6 +203,7 @@ class TestQcReportQueueJobs:
         mock_run.assert_called_once_with(
             plink_qc_prefix='/qc/COH999_20260115_qc',
             king_seg_path='/king/COH999_20260115_king.seg',
+            king_excluded_path='/king/COH999_20260115_king.excluded_samples.tsv',
             bafregress_paths=['gs://baf/COHP1.BAFRegress.txt', 'gs://baf/COHP2.BAFRegress.txt'],
             output_path=str(report_path),
             job_name='QcReport_super_cohort',

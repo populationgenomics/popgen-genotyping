@@ -362,13 +362,27 @@ class Plink2Qc(CohortStage):
 
 
 @stage(
-    required_stages=[MergeCohortPlink],
+    required_stages=[MergeCohortPlink, Plink2Qc],
     analysis_type='array_relatedness_ibdseg',
     analysis_keys=['seg', 'seg_x'],
 )
 class KingIbdseg(CohortStage):
     """
     Infer pairwise IBD segments across the merged cohort with KING `--ibdseg`.
+
+    ``BafRegress`` is a phase-1 (per-plate) stage that does not run in phase 2, so it is not a
+    ``required_stages`` dependency — mirroring ``QcReport``: its per-plate contamination outputs
+    are resolved by querying all registered ``array_bafregress`` analyses in Metamist
+    (``resolve_bafregress_map``) for the full super-cohort membership, and read in-job rather
+    than in the driver. ``Plink2Qc`` *is* a ``required_stages`` dependency, because its
+    ``.smiss`` carries the merged-cohort per-sample missingness (``F_MISS``) that the other
+    exclusion criterion needs, and that quantity only exists after the merge. Samples whose
+    BAFRegress estimate exceeds ``contamination_max``, or whose ``F_MISS`` exceeds
+    ``fmiss_max`` (both under ``[popgen_genotyping.king_ibdseg]``), are excluded before KING
+    runs: either a contaminated sample's genotype noise or a poorly-called sample's missingness
+    generates thousands of spurious pairwise relationships, which would otherwise show up as a
+    "relative" of every clean sample in the cohort. Excluded samples keep all their QC columns
+    — ``QcReport`` flags them ``RELATEDNESS_EXCLUDED`` rather than dropping them from the report.
     """
 
     def expected_outputs(self, cohort: Cohort) -> dict[str, Path]:
@@ -388,6 +402,7 @@ class KingIbdseg(CohortStage):
             'seg_x': prefix / f'{output_base_name}X.seg',
             'segments_x': prefix / f'{output_base_name}X.segments.gz',
             'log': prefix / f'{output_base_name}.log',
+            'excluded': prefix / f'{output_base_name}.excluded_samples.tsv',
         }
 
     def queue_jobs(self, cohort: Cohort, inputs: StageInput) -> StageOutput:
@@ -397,6 +412,17 @@ class KingIbdseg(CohortStage):
         outputs: dict[str, Path] = self.expected_outputs(cohort=cohort)
 
         merged_plink: dict[str, Path] = inputs.as_dict(target=cohort, stage=MergeCohortPlink)
+        smiss_path: Path = inputs.as_path(target=cohort, stage=Plink2Qc, key='smiss')
+
+        # Resolve BafRegress paths for the full super-cohort membership (same resolution as
+        # QcReport); the map is sg_id -> plate-level file, so dedupe before passing them on.
+        # The files themselves are read in-job, not here, since the exclusion decision also
+        # needs the merged-cohort .smiss and both must be evaluated against the same universe.
+        bafregress_map: dict[str, str] = resolve_bafregress_map(sg_ids=cohort.get_sequencing_group_ids())
+        bafregress_paths: list[str] = sorted(set(bafregress_map.values()))
+
+        contamination_max: float = config_retrieve(['popgen_genotyping', 'king_ibdseg', 'contamination_max'])
+        fmiss_max: float = config_retrieve(['popgen_genotyping', 'king_ibdseg', 'fmiss_max'])
 
         jobs: list[BashJob] = run_king_ibdseg(
             bed_path=str(merged_plink['bed']),
@@ -407,6 +433,11 @@ class KingIbdseg(CohortStage):
             output_seg_x_path=str(outputs['seg_x']),
             output_segments_x_path=str(outputs['segments_x']),
             output_log_path=str(outputs['log']),
+            bafregress_paths=bafregress_paths,
+            smiss_path=str(smiss_path),
+            contamination_max=contamination_max,
+            fmiss_max=fmiss_max,
+            output_excluded_path=str(outputs['excluded']),
             job_name=f'KingIbdseg_{cohort.name}',
         )
 
@@ -525,6 +556,10 @@ class QcReport(CohortStage):
         # Autosomal KING --ibdseg pairwise summary (REL_ID:KINSHIP:INFTYPE)
         king_seg_path: Path = inputs.as_path(target=cohort, stage=KingIbdseg, key='seg')
 
+        # Samples excluded from KING --ibdseg for contamination or missingness: kept in the report
+        # with all QC columns, flagged RELATEDNESS_EXCLUDED with the reason.
+        king_excluded_path: Path = inputs.as_path(target=cohort, stage=KingIbdseg, key='excluded')
+
         # Resolve the BafRegress output for every super-cohort SG from Metamist (full membership,
         # not just the new plates), since BafRegress does not run as a phase-2 stage.
         # The map is sg_id -> plate-level file (one file per plate cohort), so dedupe before
@@ -537,6 +572,7 @@ class QcReport(CohortStage):
         j: BashJob = run_qc_report(
             plink_qc_prefix=plink_qc_prefix,
             king_seg_path=str(king_seg_path),
+            king_excluded_path=str(king_excluded_path),
             bafregress_paths=bafregress_paths,
             output_path=str(outputs),
             job_name=f'QcReport_{cohort.name}',

@@ -12,6 +12,7 @@ from popgen_genotyping.scripts.merge_qc import (
     INFTYPE_TO_DEGREE,
     main,
     process_bafregress,
+    process_relatedness_excluded,
     process_seg,
     read_qc_file,
 )
@@ -182,6 +183,51 @@ class TestProcessBafregress:
         assert result.empty
 
 
+# -- process_relatedness_excluded -----------------------------------------------
+
+
+class TestProcessRelatednessExcluded:
+    """Tests for process_relatedness_excluded."""
+
+    def test_flags_only_excluded_iids_with_reason(self, tmp_dir: Path) -> None:
+        """Only IIDs present in the exclusion TSV are flagged, with their REASON string."""
+        path = _write(
+            tmp_dir / 'excluded.tsv',
+            'IID\tREASON\tBAF_REGRESS\tF_MISS\nS2\tcontamination\t0.1125\t0.01\n',
+        )
+        report_iids = pd.Series(['S1', 'S2', 'S3'])
+        result = process_relatedness_excluded(path, report_iids)
+        assert list(result.columns) == ['IID', 'RELATEDNESS_EXCLUDED']
+        values = result.set_index('IID')['RELATEDNESS_EXCLUDED']
+        assert pd.isna(values['S1'])
+        assert values['S2'] == 'contamination'
+        assert pd.isna(values['S3'])
+
+    def test_combined_reason_string(self, tmp_dir: Path) -> None:
+        """A sample excluded for both criteria carries the combined REASON string."""
+        path = _write(
+            tmp_dir / 'excluded.tsv',
+            'IID\tREASON\tBAF_REGRESS\tF_MISS\nS1\tcontamination;missingness\t0.1125\t0.05\n',
+        )
+        report_iids = pd.Series(['S1'])
+        result = process_relatedness_excluded(path, report_iids)
+        assert result.set_index('IID')['RELATEDNESS_EXCLUDED']['S1'] == 'contamination;missingness'
+
+    def test_header_only_file_flags_nothing(self, tmp_dir: Path) -> None:
+        """A header-only exclusion TSV flags no report IID."""
+        path = _write(tmp_dir / 'excluded.tsv', 'IID\tREASON\tBAF_REGRESS\tF_MISS\n')
+        report_iids = pd.Series(['S1', 'S2'])
+        result = process_relatedness_excluded(path, report_iids)
+        assert result['RELATEDNESS_EXCLUDED'].isna().all()
+
+    def test_excluded_iid_not_in_report_raises(self, tmp_dir: Path) -> None:
+        """An excluded IID absent from the report raises ValueError."""
+        path = _write(tmp_dir / 'excluded.tsv', 'IID\tREASON\tBAF_REGRESS\tF_MISS\nS99\tcontamination\t0.5\t0.01\n')
+        report_iids = pd.Series(['S1', 'S2'])
+        with pytest.raises(ValueError, match='not found in QC report'):
+            process_relatedness_excluded(path, report_iids)
+
+
 # -- end-to-end ----------------------------------------------------------------
 
 
@@ -212,6 +258,7 @@ class TestEndToEnd:
             tmp_dir / 'baf.txt',
             'sample_id\tLRR_mean\nS1\t0.005\nS2\t0.006\n',
         )
+        relatedness_excluded_path = _write(tmp_dir / 'excluded.tsv', 'IID\tREASON\tBAF_REGRESS\tF_MISS\n')
         output_path = str(tmp_dir / 'output.csv')
 
         # Call main with sys.argv override
@@ -225,6 +272,8 @@ class TestEndToEnd:
             sexcheck_path,
             '--seg',
             seg_path,
+            '--relatedness-excluded',
+            relatedness_excluded_path,
             '--output',
             output_path,
             '--bafregress',
@@ -242,6 +291,7 @@ class TestEndToEnd:
         with open(output_path) as f:
             reader = csv.DictReader(f)
             rows = list(reader)
+            fieldnames = reader.fieldnames or []
 
         assert len(rows) == 2
         assert rows[0]['IID'] == 'S1'
@@ -257,3 +307,110 @@ class TestEndToEnd:
         # Bafregress data should be merged
         assert 'LRR_mean' in rows[0]
         assert rows[0]['LRR_mean'] == '0.005'
+
+        # Nobody was excluded from KING in this run.
+        assert rows[0]['RELATEDNESS_EXCLUDED'] == ''
+        assert rows[1]['RELATEDNESS_EXCLUDED'] == ''
+
+        # RELATEDNESS_EXCLUDED sits immediately after RELATED_3RD.
+        assert fieldnames.index('RELATEDNESS_EXCLUDED') == fieldnames.index('RELATED_3RD') + 1
+
+    def test_excluded_sample_with_relatives_raises(self, tmp_dir: Path) -> None:
+        """A sample flagged RELATEDNESS_EXCLUDED but still present in the .seg raises.
+
+        This is the invariant that KING never saw an excluded sample: the exclusion list
+        and the .seg file disagreeing means the recode job's --remove didn't actually drop
+        the sample before KING ran.
+        """
+        smiss_path = _write(
+            tmp_dir / 'test.smiss',
+            '#FID\tIID\tMISS_PHENO_CT\tMISSING_CT\tOBS_CT\tF_MISS\n'
+            'FAM1\tS1\t0\t10\t1000\t0.01\n'
+            'FAM2\tS2\t0\t20\t1000\t0.02\n',
+        )
+        het_path = _write(
+            tmp_dir / 'test.het',
+            '#FID\tIID\tO_HOM\tE_HOM\tN_NM\tF\nFAM1\tS1\t500\t490\t1000\t0.02\nFAM2\tS2\t510\t490\t1000\t0.04\n',
+        )
+        sexcheck_path = _write(
+            tmp_dir / 'test.sexcheck',
+            '#FID\tIID\tPEDSEX\tSNPSEX\tSTATUS\tF\nFAM1\tS1\t1\t1\tOK\t0.99\nFAM2\tS2\t2\t2\tOK\t0.01\n',
+        )
+        seg_path = _write(
+            tmp_dir / 'test.seg',
+            _SEG_HEADER + 'FAM1\tS1\tFAM2\tS2\t0.5000\t0.2500\t0.7500\tFS\n',
+        )
+        relatedness_excluded_path = _write(
+            tmp_dir / 'excluded.tsv',
+            'IID\tREASON\tBAF_REGRESS\tF_MISS\nS1\tcontamination\t0.1125\t0.01\n',
+        )
+        output_path = str(tmp_dir / 'output.csv')
+
+        sys_argv = [
+            'merge_qc.py',
+            '--smiss',
+            smiss_path,
+            '--het',
+            het_path,
+            '--sexcheck',
+            sexcheck_path,
+            '--seg',
+            seg_path,
+            '--relatedness-excluded',
+            relatedness_excluded_path,
+            '--output',
+            output_path,
+        ]
+
+        original_argv = sys.argv
+        try:
+            sys.argv = sys_argv
+            with pytest.raises(ValueError, match='unexpectedly have KING relatives'):
+                main()
+        finally:
+            sys.argv = original_argv
+
+    def test_excluded_iid_not_in_report_raises_from_main(self, tmp_dir: Path) -> None:
+        """main() propagates the error when the exclusion list names an unknown IID."""
+        smiss_path = _write(
+            tmp_dir / 'test.smiss',
+            '#FID\tIID\tMISS_PHENO_CT\tMISSING_CT\tOBS_CT\tF_MISS\nFAM1\tS1\t0\t10\t1000\t0.01\n',
+        )
+        het_path = _write(
+            tmp_dir / 'test.het',
+            '#FID\tIID\tO_HOM\tE_HOM\tN_NM\tF\nFAM1\tS1\t500\t490\t1000\t0.02\n',
+        )
+        sexcheck_path = _write(
+            tmp_dir / 'test.sexcheck',
+            '#FID\tIID\tPEDSEX\tSNPSEX\tSTATUS\tF\nFAM1\tS1\t1\t1\tOK\t0.99\n',
+        )
+        seg_path = _write(tmp_dir / 'test.seg', _SEG_HEADER)
+        relatedness_excluded_path = _write(
+            tmp_dir / 'excluded.tsv',
+            'IID\tREASON\tBAF_REGRESS\tF_MISS\nS99\tcontamination\t0.5\t0.01\n',
+        )
+        output_path = str(tmp_dir / 'output.csv')
+
+        sys_argv = [
+            'merge_qc.py',
+            '--smiss',
+            smiss_path,
+            '--het',
+            het_path,
+            '--sexcheck',
+            sexcheck_path,
+            '--seg',
+            seg_path,
+            '--relatedness-excluded',
+            relatedness_excluded_path,
+            '--output',
+            output_path,
+        ]
+
+        original_argv = sys.argv
+        try:
+            sys.argv = sys_argv
+            with pytest.raises(ValueError, match='not found in QC report'):
+                main()
+        finally:
+            sys.argv = original_argv

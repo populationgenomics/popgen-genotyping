@@ -19,11 +19,13 @@ flowchart TB
         MergeCohortPlink --> KingIbdseg
         ExportCohortDatasets --> Plink2Qc
         ExportCohortDatasets --> SnpQcReport
+        Plink2Qc --> KingIbdseg
         Plink2Qc --> QcReport
         KingIbdseg --> QcReport
     end
     prev["Previous aggregate<br/>(array_aggregate_pgen)"] -. Metamist .-> MergeCohortPlink
     CohortBcfToPlink -. "Metamist (array_cohort_bed)" .-> MergeCohortPlink
+    BafRegress -. "Metamist (array_bafregress)" .-> KingIbdseg
     BafRegress -. "Metamist (array_bafregress)" .-> QcReport
 ```
 
@@ -38,7 +40,8 @@ phases run as separate submissions with the manual super-cohort creation in betw
 - **MergeCohortPlink**: Merges PLINK files from multiple cohorts into a single, unified dataset. This stage also supports a "rolling aggregate" workflow, where new samples are added to a previously generated aggregate. See [Rolling aggregate & two-phase run](#rolling-aggregate--two-phase-run).
 - **ExportCohortDatasets**: Converts the merged PLINK 1.9 dataset into PLINK2 (`.pgen`) format for long-term storage and analysis, and `.bcf` format in temporary storage for ancestry analysis.
 - **Plink2Qc**: Performs a standard suite of quality control checks on the final PLINK2 dataset, including sample/variant missingness, allele frequency, HWE, heterozygosity, and kinship.
-- **KingIbdseg**: Runs KING `--ibdseg --degree 3` against the merged PLINK 1.9 dataset to call pairwise IBD segments. Emits autosomal `.seg` / `.segments.gz` and (when chrX SNPs are present) X-chr companions `X.seg` / `X.segments.gz`, plus the captured KING log. Outputs land in long-term storage and are registered as an `array_relatedness_ibdseg` Metamist analysis; folding the pairwise summary into the QC CSV is tracked as a follow-up.
+- **KingIbdseg**: Runs KING `--ibdseg --degree 3` against the merged PLINK 1.9 dataset to call pairwise IBD segments. Before recoding, samples whose BAFRegress contamination estimate exceeds `contamination_max`, or whose `Plink2Qc`-derived per-sample missingness (`F_MISS`) exceeds `fmiss_max`, are dropped with `plink2 --remove` — either condition otherwise generates thousands of spurious pairwise relationships that would contaminate every clean sample's relatedness list. Emits autosomal `.seg` / `.segments.gz` and (when chrX SNPs are present) X-chr companions `X.seg` / `X.segments.gz`, the captured KING log, and an excluded-samples audit TSV (`IID`, `REASON`, `BAF_REGRESS`, `F_MISS`). Outputs land in long-term storage and are registered as an `array_relatedness_ibdseg` Metamist analysis. The pairwise summary and the exclusion flag are folded into the QC CSV by `QcReport` (`RELATED_*` columns, `RELATEDNESS_EXCLUDED`).
+- **QcReport**: Merges `Plink2Qc`, `KingIbdseg`, and `BafRegress` outputs into a single per-sample CSV. Samples excluded from `KingIbdseg` keep all their QC columns and are flagged `RELATEDNESS_EXCLUDED` with the exclusion reason (`contamination`, `missingness`, or both), rather than appearing to have thousands of relatives.
 
 ### Per-plate outputs are immutable
 `CohortBcfToPlink` and `BafRegress` write to durable, **version-independent** paths
@@ -142,6 +145,9 @@ The pipeline is configured using a TOML file, one per phase: start from
     - `af_ref_path` (optional): Path to a VCF containing population allele frequencies for `BafRegress`.
 - `[popgen_genotyping.merge_cohort_plink]`:
     - `previous_aggregate_cohort_id` (optional): The Metamist **cohort ID** of a previous aggregate to roll forward. Omit for a from-scratch (bootstrap) build. Use `scripts/list_aggregates.py` to list registered aggregate cohorts and pick one. See [Rolling aggregate & two-phase run](#rolling-aggregate--two-phase-run).
+- `[popgen_genotyping.king_ibdseg]`:
+    - `contamination_max`: BAFRegress threshold above which a sample is dropped before KING `--ibdseg` (strictly greater than).
+    - `fmiss_max`: Per-sample `F_MISS` (1 − call rate) threshold above which a sample is dropped before KING `--ibdseg` (strictly greater than). Mirrors `snp_qc_report.thresholds.fmiss_max`, but applied per-sample instead of per-variant.
 
 ## Execution
 To run the pipeline, use the `analysis-runner` command. You will need to specify the path to your configuration file, the output directory, and the script to execute.
