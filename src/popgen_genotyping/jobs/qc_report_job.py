@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 def run_qc_report(
     plink_qc_prefix: str,
     king_seg_path: str,
+    king_excluded_path: str,
     bafregress_paths: list[str],
     output_path: str,
     job_name: str = 'qc_report',
@@ -26,6 +27,8 @@ def run_qc_report(
     Args:
         plink_qc_prefix: Cloud path prefix for PLINK2 QC files.
         king_seg_path: Cloud path to the KING ``--ibdseg`` autosomal ``.seg``.
+        king_excluded_path: Cloud path to the TSV of samples excluded from KING
+            ``--ibdseg`` for contamination or missingness (``IID``, ``REASON``, ``BAF_REGRESS``, ``F_MISS``).
         bafregress_paths: Cloud paths to bafregress files for merging.
         output_path: Cloud path to output QC summary CSV.
         job_name: Name for the Hail Batch Job.
@@ -52,6 +55,7 @@ def run_qc_report(
     het_file = b.read_input(f'{plink_qc_prefix}.het')
     smiss_file = b.read_input(f'{plink_qc_prefix}.smiss')
     seg_file = b.read_input(king_seg_path)
+    excluded_file = b.read_input(king_excluded_path)
 
     # Read in bafregress files
     bafregress_files = [b.read_input(path) for path in bafregress_paths]
@@ -71,6 +75,7 @@ def run_qc_report(
             --het {het_file} \
             --smiss {smiss_file} \
             --seg {seg_file} \
+            --relatedness-excluded {excluded_file} \
             --output {j.output_csv.qc_report} \
             {bafregress_flag}
         """,

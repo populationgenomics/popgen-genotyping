@@ -18,6 +18,8 @@ graph TD
     ECD --> SNP[SnpQcReport<br/><i>EGT + Call-Rate + HWE Filter</i>]:::multicohort
     QC --> QR[QcReport<br/><i>Combined QC CSV</i>]:::multicohort
     BAF --> QR
+    BAF --> KING
+    QC --> KING
 
     %% Component styling
     classDef cohort fill:#d1ecf1,stroke:#007bff,stroke-width:2px;

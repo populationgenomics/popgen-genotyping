@@ -19,7 +19,7 @@ The pipeline uses official CPG common images. No local tool builds are required.
 
 ### Official Images
 - **BCFtools**: `australia-southeast1-docker.pkg.dev/cpg-common/images/bcftools:1.23-1`
-- **PLINK (Multi-version)**: `australia-southeast1-docker.pkg.dev/cpg-common/images/plink:1.9-20250819-PLINK-2.0-20260228-1`
+- **PLINK (Multi-version)**: `australia-southeast1-docker.pkg.dev/cpg-common/images/plink:1.9-20250819-PLINK-2.0-20260818-1`
     *   This image contains both `plink1.9` and `plink2` binaries, routed via a wrapper.
 
 ### Usage Instructions
