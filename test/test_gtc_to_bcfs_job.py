@@ -1,4 +1,4 @@
-"""Tests for run_gtc_to_bcfs: the reheadered-BCF sample-set assertion and the sample_mapping guards."""
+"""Tests for GtcToBcfs: the sample_mapping inversion check and run_gtc_to_bcfs's reheadered-BCF assertion."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from popgen_genotyping.jobs.gtc_to_bcfs_job import run_gtc_to_bcfs
+from popgen_genotyping.stages import GtcToBcfs
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -190,3 +191,60 @@ def test_duplicate_sg_ids_in_sample_mapping_raise(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match=r"same SG ID, duplicated: \['SG1'\]"):
         _capture_command(mapping, tmp_path)
+
+
+def _queue_gtc_to_bcfs(mapping_data: dict[str, dict[str, str]]) -> MagicMock:
+    """Run GtcToBcfs.queue_jobs with the Metamist mapping and the job function mocked.
+
+    Args:
+        mapping_data (dict[str, dict[str, str]]): SG ID -> {'gtc': path, 'old_name': barcode_pos}, as
+            returned by resolve_cohort_gtc_mapping.
+
+    Returns:
+        MagicMock: The mocked run_gtc_to_bcfs, to inspect the sample_mapping it was called with.
+    """
+    mock_cohort = MagicMock()
+    mock_cohort.id = 'COH999'
+    mock_self = MagicMock()
+    mock_self.expected_outputs.return_value = {
+        'heavy_bcf': 'gs://o/heavy.bcf',
+        'light_bcf': 'gs://o/light.bcf',
+        'metadata_tsv': 'gs://o/meta.tsv',
+    }
+
+    with (
+        patch('popgen_genotyping.stages.config_retrieve', return_value='gs://x/ref'),
+        patch('popgen_genotyping.stages.resolve_cohort_gtc_mapping', return_value=mapping_data),
+        patch('popgen_genotyping.stages.run_gtc_to_bcfs') as mock_run,
+    ):
+        GtcToBcfs.queue_jobs(mock_self, mock_cohort, MagicMock())
+    return mock_run
+
+
+def test_queue_jobs_inverts_mapping_to_barcode_position_keyed_sg_ids() -> None:
+    """With unique names, run_gtc_to_bcfs receives barcode_position -> SG ID for every SG."""
+    mapping_data = {sg_id: {'gtc': f'gs://x/{sg_id}.gtc', 'old_name': name} for name, sg_id in _SAMPLE_MAPPING.items()}
+
+    mock_run = _queue_gtc_to_bcfs(mapping_data)
+
+    assert mock_run.call_args.kwargs['sample_mapping'] == _SAMPLE_MAPPING
+    assert len(mock_run.call_args.kwargs['gtc_paths']) == len(_SAMPLE_MAPPING)
+
+
+def test_queue_jobs_raises_when_sgs_share_a_barcode_position() -> None:
+    """Two SGs with the same barcode_position must fail, not collapse to one dict key.
+
+    A manifest barcode corrupted to scientific notation gives many chips one name, so the plain
+    inversion silently kept one SG per name and the expected-sample set stopped matching the cohort.
+    """
+    mangled = '2.10298E+11_R01C01'
+    mapping_data = {
+        'SG1': {'gtc': 'gs://x/1.gtc', 'old_name': mangled},
+        'SG2': {'gtc': 'gs://x/2.gtc', 'old_name': mangled},
+        'SG3': {'gtc': 'gs://x/3.gtc', 'old_name': '210297820108_R02C01'},
+    }
+
+    with pytest.raises(
+        ValueError, match=r"1 barcode_position name\(s\) shared.*2\.10298E\+11_R01C01: \['SG1', 'SG2'\]"
+    ):
+        _queue_gtc_to_bcfs(mapping_data)
