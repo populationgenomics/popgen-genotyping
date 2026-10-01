@@ -4,6 +4,7 @@ This file exists to define all the Stages for the workflow.
 
 from __future__ import annotations
 
+from collections import defaultdict
 from typing import TYPE_CHECKING
 
 from cpg_flow.stage import CohortStage, stage
@@ -71,8 +72,20 @@ class GtcToBcfs(CohortStage):
         mapping_data: dict[str, dict[str, str]] = resolve_cohort_gtc_mapping(cohort=cohort)
 
         gtc_paths: list[str] = [d['gtc'] for d in mapping_data.values()]
-        # sample_mapping: barcode_pos -> SG_ID
-        sample_mapping: dict[str, str] = {d['old_name']: sg_id for sg_id, d in mapping_data.items()}
+        # sample_mapping: barcode_pos -> SG_ID. Invert with an explicit collision check: a plain dict
+        # comprehension silently drops SGs that share a name, which is what a corrupted manifest barcode does.
+        sg_ids_by_old_name: dict[str, list[str]] = defaultdict(list)
+        for sg_id, d in mapping_data.items():
+            sg_ids_by_old_name[d['old_name']].append(sg_id)
+        collisions: dict[str, list[str]] = {name: sgs for name, sgs in sg_ids_by_old_name.items() if len(sgs) > 1}
+        if collisions:
+            examples: str = '; '.join(f'{name}: {sgs}' for name, sgs in list(collisions.items())[:5])
+            raise ValueError(
+                f'Cohort {cohort.id} has {len(collisions)} barcode_position name(s) shared by several sequencing '
+                f'groups (corrupted sentrix_barcode_a / sentrix_position_a in the manifest?); first '
+                f'{min(len(collisions), 5)}: {examples}'
+            )
+        sample_mapping: dict[str, str] = {name: sgs[0] for name, sgs in sg_ids_by_old_name.items()}
 
         j: BashJob = run_gtc_to_bcfs(
             gtc_paths=gtc_paths,
