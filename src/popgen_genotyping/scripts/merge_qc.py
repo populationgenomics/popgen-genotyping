@@ -24,6 +24,10 @@ INFTYPE_TO_DEGREE: dict[str, str] = {
     '3rd': 'RELATED_3RD',
 }
 
+# InfType values beyond the --degree 3 we ask KING for. KING still labels the odd pair
+# on the 3rd/4th boundary (PropIBD ~0.088) as 4th; those rows are dropped, not binned.
+INFTYPE_BEYOND_DEGREE: frozenset[str] = frozenset({'4th'})
+
 
 def read_qc_file(filepath: str) -> pd.DataFrame:
     """Read a whitespace-delimited PLINK2 QC file.
@@ -47,8 +51,9 @@ def process_seg(seg_path: str) -> pd.DataFrame:
     Each degree column contains semicolon-separated ``REL_ID:KINSHIP:INFTYPE``
     strings. Kinship is the IBD-based KING kinship coefficient
     ``IBD1Seg/4 + IBD2Seg/2`` (equivalent to ``PropIBD/2``). InfType is KING's
-    relationship inference (``PO``, ``FS``, ``2nd``, ``3rd``, ``Dup/MZ``); any
-    InfType not in that set raises ``ValueError``.
+    relationship inference (``PO``, ``FS``, ``2nd``, ``3rd``, ``Dup/MZ``). Pairs
+    labelled beyond the requested degree (``4th``) are dropped, with the count
+    printed to stderr; any other InfType raises ``ValueError``.
 
     Args:
         seg_path: Path to the autosomal ``.seg`` file emitted by KING
@@ -75,12 +80,22 @@ def process_seg(seg_path: str) -> pd.DataFrame:
             f'.seg file {seg_path} is missing required column(s): {sorted(missing)}',
         )
 
-    unknown = set(seg_df['InfType']) - set(INFTYPE_TO_DEGREE)
+    unknown = set(seg_df['InfType']) - set(INFTYPE_TO_DEGREE) - INFTYPE_BEYOND_DEGREE
     if unknown:
         raise ValueError(
             f'.seg file {seg_path} contains unrecognised InfType value(s): {sorted(unknown)}. '
             f'Expected one of {sorted(INFTYPE_TO_DEGREE)}.',
         )
+
+    beyond = seg_df['InfType'].isin(list(INFTYPE_BEYOND_DEGREE))
+    n_beyond = int(beyond.sum())
+    if n_beyond:
+        print(
+            f'Dropping {n_beyond} pair(s) from {seg_path} with InfType beyond the requested degree: '
+            f'{sorted(INFTYPE_BEYOND_DEGREE)}',
+            file=sys.stderr,
+        )
+        seg_df = seg_df.loc[~beyond]
 
     seg_df = seg_df.assign(
         KINSHIP=(seg_df['IBD1Seg'].astype(float) / 4.0 + seg_df['IBD2Seg'].astype(float) / 2.0).round(4),

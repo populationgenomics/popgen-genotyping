@@ -9,6 +9,7 @@ import pytest
 
 from popgen_genotyping.scripts.merge_qc import (
     DEGREE_COLS,
+    INFTYPE_BEYOND_DEGREE,
     INFTYPE_TO_DEGREE,
     main,
     process_bafregress,
@@ -79,6 +80,10 @@ class TestInftypeToDegree:
         assert '4th' not in INFTYPE_TO_DEGREE
         assert 'UN' not in INFTYPE_TO_DEGREE
 
+    def test_beyond_degree_is_only_4th(self) -> None:
+        """Only 4th is tolerated as beyond the requested degree; UN still raises."""
+        assert {'4th'} == INFTYPE_BEYOND_DEGREE
+
 
 # -- process_seg ---------------------------------------------------------------
 
@@ -122,6 +127,26 @@ class TestProcessSeg:
         )
         with pytest.raises(ValueError, match='unrecognised InfType'):
             process_seg(path)
+
+    def test_4th_degree_dropped(self, tmp_dir: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        """4th-degree pairs are dropped with a stderr note; other pairs are kept."""
+        path = _write(
+            tmp_dir / 'fourth.seg',
+            _SEG_HEADER + 'F\tS1\tF\tS2\t0.5000\t0.2500\t0.7500\tFS\n' + 'F\tS3\tF\tS4\t0.1743\t0.0012\t0.0884\t4th\n',
+        )
+        result = process_seg(path)
+        assert set(result['IID']) == {'S1', 'S2'}
+        assert 'Dropping 1 pair(s)' in capsys.readouterr().err
+
+    def test_only_4th_degree_returns_empty(self, tmp_dir: Path) -> None:
+        """A .seg holding only 4th-degree pairs yields the empty relatedness frame."""
+        path = _write(
+            tmp_dir / 'only_fourth.seg',
+            _SEG_HEADER + 'F\tS3\tF\tS4\t0.1743\t0.0012\t0.0884\t4th\n',
+        )
+        result = process_seg(path)
+        assert result.empty
+        assert list(result.columns) == ['IID', *DEGREE_COLS]
 
     def test_missing_columns_raises(self, tmp_dir: Path) -> None:
         """Missing required columns raise ValueError."""
