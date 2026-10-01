@@ -91,7 +91,7 @@ def run_gtc_to_bcfs(
     # Building the command
     j.command(
         f"""
-        set -ex
+        set -exo pipefail
 
         mkdir -p $BATCH_TMPDIR/bcftools-tmp
 
