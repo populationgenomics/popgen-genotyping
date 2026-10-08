@@ -15,11 +15,14 @@ from popgen_genotyping.jobs.baf_regress_job import run_bafregress
 from popgen_genotyping.jobs.cohort_bcf_to_plink_job import run_cohort_bcf_to_plink
 from popgen_genotyping.jobs.export_cohort_datasets_job import run_export_cohort_datasets
 from popgen_genotyping.jobs.gtc_to_bcfs_job import run_gtc_to_bcfs
+from popgen_genotyping.jobs.ibis_relatedness_job import resolve_genetic_map_paths, run_ibis_relatedness
 from popgen_genotyping.jobs.king_ibdseg_job import run_king_ibdseg
+from popgen_genotyping.jobs.king_robust_job import run_king_robust
 from popgen_genotyping.jobs.merge_cohort_plink_job import run_merge_plink
 from popgen_genotyping.jobs.plink2_qc_job import run_plink2_qc
 from popgen_genotyping.jobs.plink2_to_plink1_job import run_plink2_to_plink1
 from popgen_genotyping.jobs.qc_report_job import run_qc_report
+from popgen_genotyping.jobs.relatedness_exclusions_job import run_relatedness_exclusions
 from popgen_genotyping.jobs.snp_qc_report_job import run_snp_qc_report
 from popgen_genotyping.metamist_utils import (
     format_merge_plan,
@@ -375,13 +378,13 @@ class Plink2Qc(CohortStage):
 
 
 @stage(
-    required_stages=[MergeCohortPlink, Plink2Qc],
-    analysis_type='array_relatedness_ibdseg',
-    analysis_keys=['seg', 'seg_x'],
+    required_stages=[Plink2Qc],
+    analysis_type='array_relatedness_exclusions',
+    analysis_keys=['excluded'],
 )
-class KingIbdseg(CohortStage):
+class RelatednessExclusions(CohortStage):
     """
-    Infer pairwise IBD segments across the merged cohort with KING `--ibdseg`.
+    Select the samples left out of every relatedness estimator, for contamination or missingness.
 
     ``BafRegress`` is a phase-1 (per-plate) stage that does not run in phase 2, so it is not a
     ``required_stages`` dependency — mirroring ``QcReport``: its per-plate contamination outputs
@@ -391,11 +394,72 @@ class KingIbdseg(CohortStage):
     ``.smiss`` carries the merged-cohort per-sample missingness (``F_MISS``) that the other
     exclusion criterion needs, and that quantity only exists after the merge. Samples whose
     BAFRegress estimate exceeds ``contamination_max``, or whose ``F_MISS`` exceeds
-    ``fmiss_max`` (both under ``[popgen_genotyping.king_ibdseg]``), are excluded before KING
-    runs: either a contaminated sample's genotype noise or a poorly-called sample's missingness
-    generates thousands of spurious pairwise relationships, which would otherwise show up as a
-    "relative" of every clean sample in the cohort. Excluded samples keep all their QC columns
-    — ``QcReport`` flags them ``RELATEDNESS_EXCLUDED`` rather than dropping them from the report.
+    ``fmiss_max`` (both under ``[popgen_genotyping.relatedness_exclusions]``), are excluded
+    before ``KingIbdseg``, ``KingRobust`` and ``IbisRelatedness`` run: either a contaminated
+    sample's genotype noise or a poorly-called sample's missingness generates thousands of
+    spurious pairwise relationships, which would otherwise show up as a "relative" of every
+    clean sample in the cohort. The three estimators all consume the same ``remove_list`` (a
+    plink2 ``--remove`` file), so they cannot disagree about who was left out. Excluded samples
+    keep all their QC columns — ``QcReport`` flags them ``RELATEDNESS_EXCLUDED`` rather than
+    dropping them from the report.
+    """
+
+    def expected_outputs(self, cohort: Cohort) -> dict[str, Path]:
+        """
+        Define the excluded-samples audit TSV and the plink2 ``--remove`` list for the cohort.
+        """
+        prefix: Path = get_output_prefix(dataset=cohort.dataset, stage_name=self.name)
+        output_base_name = f'{cohort.id}_relatedness'
+        return {
+            'excluded': prefix / f'{output_base_name}.excluded_samples.tsv',
+            'remove_list': prefix / f'{output_base_name}.remove_list.txt',
+        }
+
+    def queue_jobs(self, cohort: Cohort, inputs: StageInput) -> StageOutput:
+        """
+        Queue the job that selects the samples to exclude from relatedness estimation.
+        """
+        outputs: dict[str, Path] = self.expected_outputs(cohort=cohort)
+
+        smiss_path: Path = inputs.as_path(target=cohort, stage=Plink2Qc, key='smiss')
+
+        # Resolve BafRegress paths for the full super-cohort membership (same resolution as
+        # QcReport); the map is sg_id -> plate-level file, so dedupe before passing them on.
+        # The files themselves are read in-job, not here, since the exclusion decision also
+        # needs the merged-cohort .smiss and both must be evaluated against the same universe.
+        bafregress_map: dict[str, str] = resolve_bafregress_map(sg_ids=cohort.get_sequencing_group_ids())
+        bafregress_paths: list[str] = sorted(set(bafregress_map.values()))
+
+        stage_path: list[str] = ['popgen_genotyping', 'relatedness_exclusions']
+        contamination_max: float = config_retrieve([*stage_path, 'contamination_max'])
+        fmiss_max: float = config_retrieve([*stage_path, 'fmiss_max'])
+
+        j: BashJob = run_relatedness_exclusions(
+            bafregress_paths=bafregress_paths,
+            smiss_path=str(smiss_path),
+            contamination_max=contamination_max,
+            fmiss_max=fmiss_max,
+            output_excluded_path=str(outputs['excluded']),
+            output_remove_list_path=str(outputs['remove_list']),
+            job_name=f'RelatednessExclusions_{cohort.name}',
+        )
+
+        return self.make_outputs(cohort, data=outputs, jobs=[j])
+
+
+@stage(
+    required_stages=[MergeCohortPlink, RelatednessExclusions],
+    analysis_type='array_relatedness_ibdseg',
+    analysis_keys=['seg', 'seg_x'],
+)
+class KingIbdseg(CohortStage):
+    """
+    Infer pairwise IBD segments across the merged cohort with KING `--ibdseg`.
+
+    The samples in the ``RelatednessExclusions`` remove list (contaminated or poorly-called) are
+    dropped before KING runs, so they never appear in the ``.seg``. The threshold keys and the
+    BAFRegress/``.smiss`` inputs behind that list belong to ``RelatednessExclusions``; this
+    stage's resources are under ``[popgen_genotyping.king_ibdseg]``.
     """
 
     def expected_outputs(self, cohort: Cohort) -> dict[str, Path]:
@@ -415,7 +479,6 @@ class KingIbdseg(CohortStage):
             'seg_x': prefix / f'{output_base_name}X.seg',
             'segments_x': prefix / f'{output_base_name}X.segments.gz',
             'log': prefix / f'{output_base_name}.log',
-            'excluded': prefix / f'{output_base_name}.excluded_samples.tsv',
         }
 
     def queue_jobs(self, cohort: Cohort, inputs: StageInput) -> StageOutput:
@@ -425,17 +488,7 @@ class KingIbdseg(CohortStage):
         outputs: dict[str, Path] = self.expected_outputs(cohort=cohort)
 
         merged_plink: dict[str, Path] = inputs.as_dict(target=cohort, stage=MergeCohortPlink)
-        smiss_path: Path = inputs.as_path(target=cohort, stage=Plink2Qc, key='smiss')
-
-        # Resolve BafRegress paths for the full super-cohort membership (same resolution as
-        # QcReport); the map is sg_id -> plate-level file, so dedupe before passing them on.
-        # The files themselves are read in-job, not here, since the exclusion decision also
-        # needs the merged-cohort .smiss and both must be evaluated against the same universe.
-        bafregress_map: dict[str, str] = resolve_bafregress_map(sg_ids=cohort.get_sequencing_group_ids())
-        bafregress_paths: list[str] = sorted(set(bafregress_map.values()))
-
-        contamination_max: float = config_retrieve(['popgen_genotyping', 'king_ibdseg', 'contamination_max'])
-        fmiss_max: float = config_retrieve(['popgen_genotyping', 'king_ibdseg', 'fmiss_max'])
+        remove_list_path: Path = inputs.as_path(target=cohort, stage=RelatednessExclusions, key='remove_list')
 
         jobs: list[BashJob] = run_king_ibdseg(
             bed_path=str(merged_plink['bed']),
@@ -446,12 +499,150 @@ class KingIbdseg(CohortStage):
             output_seg_x_path=str(outputs['seg_x']),
             output_segments_x_path=str(outputs['segments_x']),
             output_log_path=str(outputs['log']),
-            bafregress_paths=bafregress_paths,
-            smiss_path=str(smiss_path),
-            contamination_max=contamination_max,
-            fmiss_max=fmiss_max,
-            output_excluded_path=str(outputs['excluded']),
+            remove_list_path=str(remove_list_path),
             job_name=f'KingIbdseg_{cohort.name}',
+        )
+
+        return self.make_outputs(cohort, data=outputs, jobs=jobs)
+
+
+@stage(
+    required_stages=[ExportCohortDatasets, RelatednessExclusions],
+    analysis_type='array_relatedness_king_robust',
+    analysis_keys=['kin0'],
+)
+class KingRobust(CohortStage):
+    """
+    Pairwise KING-robust kinship across the merged cohort with ``plink2 --make-king-table``.
+
+    The second of three relatedness estimators (with ``KingIbdseg`` and ``IbisRelatedness``).
+    It runs on all of the aggregate PGEN's variants, with no SNP-QC filtering — deliberately, to
+    match KING ``--ibdseg`` — after dropping the ``RelatednessExclusions`` samples. Only pairs
+    with kinship of at least ``kinship_min`` (``[popgen_genotyping.king_robust]``, 0.0442: the
+    3rd-degree lower bound of Manichaikul et al. 2010) are written, to a gzipped ``.kin0``.
+    ``QcReport`` bins the kinship into a degree.
+    """
+
+    def expected_outputs(self, cohort: Cohort) -> dict[str, Path]:
+        """
+        Define the gzipped ``.kin0`` pairwise table and plink2 log for the cohort.
+        """
+        prefix: Path = get_output_prefix(dataset=cohort.dataset, stage_name=self.name)
+        output_base_name = f'{cohort.id}_king_robust'
+        return {
+            'kin0': prefix / f'{output_base_name}.kin0.gz',
+            'log': prefix / f'{output_base_name}.log',
+        }
+
+    def queue_jobs(self, cohort: Cohort, inputs: StageInput) -> StageOutput:
+        """
+        Queue the ``plink2 --make-king-table`` job against the aggregate PGEN.
+        """
+        outputs: dict[str, Path] = self.expected_outputs(cohort=cohort)
+
+        pgen_path: Path = inputs.as_path(target=cohort, stage=ExportCohortDatasets, key='pgen')
+        pvar_path: Path = inputs.as_path(target=cohort, stage=ExportCohortDatasets, key='pvar')
+        psam_path: Path = inputs.as_path(target=cohort, stage=ExportCohortDatasets, key='psam')
+        remove_list_path: Path = inputs.as_path(target=cohort, stage=RelatednessExclusions, key='remove_list')
+
+        kinship_min: float = config_retrieve(['popgen_genotyping', 'king_robust', 'kinship_min'])
+
+        j: BashJob = run_king_robust(
+            pgen_path=str(pgen_path),
+            pvar_path=str(pvar_path),
+            psam_path=str(psam_path),
+            remove_list_path=str(remove_list_path),
+            kinship_min=kinship_min,
+            output_kin0_path=str(outputs['kin0']),
+            output_log_path=str(outputs['log']),
+            job_name=f'KingRobust_{cohort.name}',
+        )
+
+        return self.make_outputs(cohort, data=outputs, jobs=[j])
+
+
+@stage(
+    required_stages=[ExportCohortDatasets, RelatednessExclusions, KingIbdseg],
+    analysis_type='array_relatedness_ibis',
+    analysis_keys=['pairs'],
+)
+class IbisRelatedness(CohortStage):
+    """
+    Per-pair relatedness table from IBIS IBD segments in genetic-map cM.
+
+    The third relatedness estimator (with ``KingIbdseg`` and ``KingRobust``). KING ``--ibdseg``
+    can only filter segments by length in Mb. A population with background relatedness (a
+    bottleneck, say) gets "3rd-degree" KING pairs made of many short segments, which look
+    different from recent relatives, whose IBD is a few long segments. IBIS calls IBD segments in
+    cM (deCODE 2019 sex-averaged map, one file per chromosome, resolved from the references
+    config), and the table re-estimates each pair's kinship from IBD runs of at least several cM
+    lengths (``cutoffs_cm``), so analysts can tell recent relatedness from background IBD.
+
+    The ``RelatednessExclusions`` samples are dropped first. The autosomes and chromosome X run
+    as separate IBIS jobs, so X never enters the autosomal kinship. IBIS segments of a pair that
+    abut are joined into runs before the length cutoffs apply (``join_gap_cm``). The pairs table
+    also carries the ``KingIbdseg`` InfType and kinship of each pair, which is why that stage is
+    required. See ``jobs/ibis_relatedness_job.py`` for what each job does and why, and
+    ``scripts/ibis_relatedness_summary.py`` for the table. Parameters and per-job resources are
+    under ``[popgen_genotyping.ibis_relatedness]``; the images are ``workflow.ibis_image`` and
+    ``workflow.plink2_cm_map_image``.
+    """
+
+    def expected_outputs(self, cohort: Cohort) -> dict[str, Path]:
+        """
+        Define the pairs table, its sidecar JSON, and the raw IBIS autosomal and X outputs.
+        """
+        prefix: Path = get_output_prefix(dataset=cohort.dataset, stage_name=self.name)
+        return {
+            'pairs': prefix / f'{cohort.id}_ibis_relatedness_pairs.tsv.gz',
+            'sidecar': prefix / f'{cohort.id}_ibis_relatedness_pairs.json',
+            'autosomes_seg': prefix / f'{cohort.id}_ibis_autosomes.seg.gz',
+            'autosomes_coef': prefix / f'{cohort.id}_ibis_autosomes.coef.gz',
+            'autosomes_log': prefix / f'{cohort.id}_ibis_autosomes.log',
+            'x_seg': prefix / f'{cohort.id}_ibis_x.seg.gz',
+            'x_coef': prefix / f'{cohort.id}_ibis_x.coef.gz',
+            'x_log': prefix / f'{cohort.id}_ibis_x.log',
+        }
+
+    def queue_jobs(self, cohort: Cohort, inputs: StageInput) -> StageOutput:
+        """
+        Queue the plink2, prepare-maps, IBIS (autosomes and X) and summarise jobs.
+        """
+        outputs: dict[str, Path] = self.expected_outputs(cohort=cohort)
+
+        pgen_path: Path = inputs.as_path(target=cohort, stage=ExportCohortDatasets, key='pgen')
+        pvar_path: Path = inputs.as_path(target=cohort, stage=ExportCohortDatasets, key='pvar')
+        psam_path: Path = inputs.as_path(target=cohort, stage=ExportCohortDatasets, key='psam')
+        remove_list_path: Path = inputs.as_path(target=cohort, stage=RelatednessExclusions, key='remove_list')
+        king_seg_path: Path = inputs.as_path(target=cohort, stage=KingIbdseg, key='seg')
+
+        stage_path: list[str] = ['popgen_genotyping', 'ibis_relatedness']
+        genetic_map_reference_key: str = config_retrieve([*stage_path, 'genetic_map_reference_key'])
+        min_seg_cm: float = float(config_retrieve([*stage_path, 'min_seg_cm']))
+        min_ibd2_cm: float = float(config_retrieve([*stage_path, 'min_ibd2_cm']))
+        join_gap_cm: float = float(config_retrieve([*stage_path, 'join_gap_cm']))
+        cutoffs_cm: list[float] = [float(cutoff) for cutoff in config_retrieve([*stage_path, 'cutoffs_cm'])]
+
+        jobs: list[BashJob] = run_ibis_relatedness(
+            pgen_path=str(pgen_path),
+            pvar_path=str(pvar_path),
+            psam_path=str(psam_path),
+            king_seg_path=str(king_seg_path),
+            remove_list_path=str(remove_list_path),
+            genetic_map_paths=resolve_genetic_map_paths(genetic_map_reference_key),
+            min_seg_cm=min_seg_cm,
+            min_ibd2_cm=min_ibd2_cm,
+            join_gap_cm=join_gap_cm,
+            cutoffs_cm=cutoffs_cm,
+            output_pairs_path=str(outputs['pairs']),
+            output_sidecar_path=str(outputs['sidecar']),
+            output_autosomes_seg_path=str(outputs['autosomes_seg']),
+            output_autosomes_coef_path=str(outputs['autosomes_coef']),
+            output_autosomes_log_path=str(outputs['autosomes_log']),
+            output_x_seg_path=str(outputs['x_seg']),
+            output_x_coef_path=str(outputs['x_coef']),
+            output_x_log_path=str(outputs['x_log']),
+            job_name=f'IbisRelatedness_{cohort.name}',
         )
 
         return self.make_outputs(cohort, data=outputs, jobs=jobs)
@@ -498,22 +689,16 @@ class SnpQcReport(CohortStage):
 
         stage_path: list[str] = ['popgen_genotyping', 'snp_qc_report']
         thresholds_path: list[str] = [*stage_path, 'thresholds']
-        gentrain_min: float = config_retrieve([*thresholds_path, 'gentrain_min'], 0.7)
-        cluster_sep_min: float = config_retrieve([*thresholds_path, 'cluster_sep_min'], 0.4)
-        fmiss_max: float = config_retrieve([*thresholds_path, 'fmiss_max'], 0.02)
-        hwe_p: float = config_retrieve([*thresholds_path, 'hwe_p'], 1e-5)
-        hwe_k: float = config_retrieve([*thresholds_path, 'hwe_k'], 0.001)
-        hwe_midp: bool = config_retrieve([*thresholds_path, 'hwe_midp'], True)
-        hwe_keep_fewhet: bool = config_retrieve([*thresholds_path, 'hwe_keep_fewhet'], True)
+        gentrain_min: float = config_retrieve([*thresholds_path, 'gentrain_min'])
+        cluster_sep_min: float = config_retrieve([*thresholds_path, 'cluster_sep_min'])
+        fmiss_max: float = config_retrieve([*thresholds_path, 'fmiss_max'])
+        hwe_p: float = config_retrieve([*thresholds_path, 'hwe_p'])
+        hwe_k: float = config_retrieve([*thresholds_path, 'hwe_k'])
+        hwe_midp: bool = config_retrieve([*thresholds_path, 'hwe_midp'])
+        hwe_keep_fewhet: bool = config_retrieve([*thresholds_path, 'hwe_keep_fewhet'])
 
-        egt_info_bcf_key: str = config_retrieve(
-            [*stage_path, 'egt_info_bcf_reference_key'],
-            'illumina_microarray/GDA_8v1_0_D1_ClusterFile_egt_info_bcf',
-        )
-        egt_info_bcf_index_key: str = config_retrieve(
-            [*stage_path, 'egt_info_bcf_index_reference_key'],
-            'illumina_microarray/GDA_8v1_0_D1_ClusterFile_egt_info_bcf_index',
-        )
+        egt_info_bcf_key: str = config_retrieve([*stage_path, 'egt_info_bcf_reference_key'])
+        egt_info_bcf_index_key: str = config_retrieve([*stage_path, 'egt_info_bcf_index_reference_key'])
 
         jobs: list[BashJob] = run_snp_qc_report(
             egt_info_bcf_path=reference_path(egt_info_bcf_key),
@@ -537,7 +722,10 @@ class SnpQcReport(CohortStage):
         return self.make_outputs(cohort, data=outputs, jobs=jobs)
 
 
-@stage(required_stages=[Plink2Qc, KingIbdseg], analysis_type='array_qc_report')
+@stage(
+    required_stages=[Plink2Qc, RelatednessExclusions, KingIbdseg, KingRobust, IbisRelatedness],
+    analysis_type='array_qc_report',
+)
 class QcReport(CohortStage):
     """
     Create the QC report for the super cohort.
@@ -547,6 +735,12 @@ class QcReport(CohortStage):
     all registered ``array_bafregress`` analyses in Metamist (``resolve_bafregress_map``) and
     selecting the super cohort's full membership — covering every constituent plate, not just the
     new ones.
+
+    Relatedness gets one column per estimator (``KING_IBDSEG_RELATIVES``,
+    ``KING_ROBUST_RELATIVES``, ``IBIS_RELATIVES_GE5CM``), each listing a sample's relatives at
+    3rd degree or closer as ``REL_ID:KINSHIP:DEGREE``. Samples excluded by
+    ``RelatednessExclusions`` are flagged ``RELATEDNESS_EXCLUDED`` and must have no relatives in
+    any of the three.
     """
 
     def expected_outputs(self, cohort: Cohort) -> Path:
@@ -566,12 +760,14 @@ class QcReport(CohortStage):
         plink_qc_smiss_path: Path = inputs.as_path(target=cohort, stage=Plink2Qc, key='smiss')
         plink_qc_prefix = str(plink_qc_smiss_path).removesuffix('.smiss')
 
-        # Autosomal KING --ibdseg pairwise summary (REL_ID:KINSHIP:INFTYPE)
+        # Autosomal KING --ibdseg pairwise summary, KING-robust pairwise table and IBIS pairs table
         king_seg_path: Path = inputs.as_path(target=cohort, stage=KingIbdseg, key='seg')
+        king_robust_kin0_path: Path = inputs.as_path(target=cohort, stage=KingRobust, key='kin0')
+        ibis_pairs_path: Path = inputs.as_path(target=cohort, stage=IbisRelatedness, key='pairs')
 
-        # Samples excluded from KING --ibdseg for contamination or missingness: kept in the report
-        # with all QC columns, flagged RELATEDNESS_EXCLUDED with the reason.
-        king_excluded_path: Path = inputs.as_path(target=cohort, stage=KingIbdseg, key='excluded')
+        # Samples excluded from every relatedness estimator for contamination or missingness: kept
+        # in the report with all QC columns, flagged RELATEDNESS_EXCLUDED with the reason.
+        relatedness_excluded_path: Path = inputs.as_path(target=cohort, stage=RelatednessExclusions, key='excluded')
 
         # Resolve the BafRegress output for every super-cohort SG from Metamist (full membership,
         # not just the new plates), since BafRegress does not run as a phase-2 stage.
@@ -585,7 +781,9 @@ class QcReport(CohortStage):
         j: BashJob = run_qc_report(
             plink_qc_prefix=plink_qc_prefix,
             king_seg_path=str(king_seg_path),
-            king_excluded_path=str(king_excluded_path),
+            king_robust_kin0_path=str(king_robust_kin0_path),
+            ibis_pairs_path=str(ibis_pairs_path),
+            relatedness_excluded_path=str(relatedness_excluded_path),
             bafregress_paths=bafregress_paths,
             output_path=str(outputs),
             job_name=f'QcReport_{cohort.name}',

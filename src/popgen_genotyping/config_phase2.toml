@@ -18,7 +18,10 @@ only_stages = [
     'MergeCohortPlink',
     'ExportCohortDatasets',
     'Plink2Qc',
+    'RelatednessExclusions',
     'KingIbdseg',
+    'KingRobust',
+    'IbisRelatedness',
     'SnpQcReport',
     'QcReport',
 ]
@@ -33,6 +36,10 @@ driver_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/popgen_gen
 bcftools_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/bcftools:1.23-1'
 plink_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/plink:1.9-20250819-PLINK-2.0-20260818-1'
 king_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/king:2.3.2-1'
+ibis_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/ibis:1.20-0e1d9aa-1'
+# plink2 2.0 beta 1, for IbisRelatedness only: the plink2 in plink_image (alpha 7) has no --cm-map,
+# and that image's PLINK 1.9 --cm-map cannot read gzipped maps and silently leaves X at 0 cM.
+plink2_cm_map_image = 'australia-southeast1-docker.pkg.dev/cpg-common/images/plink2:2.0.0-b.1-20260929-1'
 version = 1
 
 [popgen_genotyping.merge_cohort_plink]
@@ -53,29 +60,91 @@ cpu = 2
 memory = 'standard'
 storage = '20G'
 
-[popgen_genotyping.king_ibdseg]
-cpu = 8
-memory = 'highmem'
-storage = '50G'
+[popgen_genotyping.relatedness_exclusions]
+cpu = 1
+memory = 'standard'
+storage = '10G'
 # Samples whose BAFRegress contamination estimate exceeds contamination_max, or whose
-# merged-set per-sample missingness exceeds fmiss_max, are dropped before KING --ibdseg
-# (they generate thousands of spurious relationships) but stay in the QC report, flagged
-# RELATEDNESS_EXCLUDED with the reason. Both thresholds are strict (>).
+# merged-set per-sample missingness exceeds fmiss_max, are dropped before KING --ibdseg,
+# KING-robust and IBIS (they generate thousands of spurious relationships) but stay in the
+# QC report, flagged RELATEDNESS_EXCLUDED with the reason. Both thresholds are strict (>).
 # BAFRegress is on the scale of the contaminating fraction; 0.03 = 3%. Agreed in
 # #popgen-analysis on 2026-04-10 for OurDNA array sample selection.
 contamination_max = 0.03
 # Per-sample F_MISS (1 - call rate) from Plink2Qc's .smiss; 0.02 = call rate below 98%.
-# Same name and value as the per-variant snp_qc_report.thresholds.fmiss_max, but applied to
-# samples. Raised from 0.01 in October 2026: 0.01 dropped clean samples (BAFRegress <= 0,
+# Same name and value as the per-variant snp_qc_report.thresholds.fmiss_max, but a separate
+# key: that one is applied to variants (keep if <=), this one to samples (exclude if >).
+# Raised from 0.01 in October 2026: 0.01 dropped clean samples (BAFRegress <= 0,
 # F_MISS 0.0106-0.0132 in COH16191), while the samples that inflated relatedness in COH15003
 # had F_MISS >= 0.047.
 fmiss_max = 0.02
+
+[popgen_genotyping.king_ibdseg]
+cpu = 8
+memory = 'highmem'
+storage = '50G'
+
+[popgen_genotyping.king_robust]
+cpu = 8
+memory = 'standard'
+storage = '20G'
+# Minimum KING-robust kinship of a pair written to the .kin0 table (plink2 --king-table-filter,
+# at or above). 0.0442 is the lower bound of 3rd degree (Manichaikul et al. 2010,
+# doi:10.1093/bioinformatics/btq559), so the table holds the pairs QcReport reports.
+kinship_min = 0.0442
+
+[popgen_genotyping.ibis_relatedness]
+# References-config key of each chromosome's genetic map, with {chromosome} filled with 1-22 and X.
+# The deCODE 2019 sex-averaged GRCh38 maps shipped under
+# gs://cpg-common-main/references/genetic_maps/decode2019/ (one file per chromosome; the references
+# repo's genetic_maps_decode2019 source).
+genetic_map_reference_key = 'genetic_maps_decode2019/sexavg_grch38_chr{chromosome}'
+# IBIS -min_l: shortest segment, and the shortest run kept (cM).
+min_seg_cm = 5
+# IBIS -min_l2: shortest IBD2 segment (cM). IBIS's 2 cM default gives parent-offspring pairs, who
+# cannot be IBD2, a few false IBD2 calls of 2 to 3 cM each.
+min_ibd2_cm = 5
+# Segments of a pair on a chromosome with a gap below this (cM) are joined into one run, because IBIS
+# reports one stretch of IBD as several abutting segments. The gaps are bimodal (many exactly 0,
+# very few 0.5 to 2 cM), so 0.5 joins abutting segments and leaves separate ones apart.
+join_gap_cm = 0.5
+# Run lengths (cM) the kinship is re-estimated at; each at least min_seg_cm. QcReport reads the
+# 5 cM columns (IBIS_RELATIVES_GE5CM), so 5 must be one of them.
+cutoffs_cm = [5, 10, 15]
+
+# Resources per job. IBIS holds the genotypes as bit vectors (~1.9 GB peak for 2,833 samples x
+# 1.66M variants, measured) and scales across threads by sample, so cores set the run time.
+# IBIS runs with -t equal to the cpu of its job. 'lowmem' is ~0.9 GB per core.
+[popgen_genotyping.ibis_relatedness.plink2]
+cpu = 4
+memory = 'standard'
+storage = '20Gi'  # the autosomal .bed is ~1.2 GB
+
+[popgen_genotyping.ibis_relatedness.prepare_maps]
+cpu = 1
+memory = 'standard'
+storage = '10Gi'
+
+[popgen_genotyping.ibis_relatedness.ibis_autosomes]
+cpu = 16
+memory = 'lowmem'
+storage = '20Gi'  # the .seg/.coef outputs are well under 1 GB
+
+[popgen_genotyping.ibis_relatedness.ibis_x]
+cpu = 4
+memory = 'lowmem'
+storage = '20Gi'
+
+[popgen_genotyping.ibis_relatedness.summarise]
+cpu = 2
+memory = 'highmem'
+storage = '10Gi'
 
 [popgen_genotyping.snp_qc_report]
 cpu = 2
 memory = 'standard'
 storage = '20G'
-# References-repo keys for the EGT INFO BCF + its index. Defaults match the
+# References-repo keys for the EGT INFO BCF + its index, both required. These match the
 # GDA-8v1-0_D1 ClusterFile shipped under gs://cpg-common-main/references/illumina_microarray/.
 # Override when running against a different Illumina chip / cluster-file revision.
 egt_info_bcf_reference_key = 'illumina_microarray/GDA_8v1_0_D1_ClusterFile_egt_info_bcf'
@@ -94,7 +163,8 @@ storage = '50G'
 [popgen_genotyping.snp_qc_report.thresholds]
 gentrain_min = 0.7
 cluster_sep_min = 0.4
-# F_MISS = 1 - call rate.
+# F_MISS = 1 - call rate. Per-variant: variants with F_MISS <= fmiss_max are kept. The per-sample
+# counterpart (exclude if >) is relatedness_exclusions.fmiss_max, a separate key with the same value.
 fmiss_max = 0.02
 # plink2 --hwe p k [midp] [keep-fewhet]: drop variants with HWE exact p-value
 # below p * 10^(-n*k), where n is the sample size. See

@@ -16,10 +16,20 @@ graph TD
     MCP --> KING[KingIbdseg<br/><i>KING --ibdseg Relatedness</i>]:::multicohort
     ECD --> QC[Plink2Qc<br/><i>Per-sample QC</i>]:::multicohort
     ECD --> SNP[SnpQcReport<br/><i>EGT + Call-Rate + HWE Filter</i>]:::multicohort
+    ECD --> KR[KingRobust<br/><i>plink2 KING-robust Relatedness</i>]:::multicohort
+    ECD --> IBIS[IbisRelatedness<br/><i>IBIS cM-segment Relatedness</i>]:::multicohort
+    QC --> EXC[RelatednessExclusions<br/><i>Contamination / Missingness Exclusions</i>]:::multicohort
     QC --> QR[QcReport<br/><i>Combined QC CSV</i>]:::multicohort
     BAF --> QR
-    BAF --> KING
-    QC --> KING
+    BAF --> EXC
+    EXC --> KING
+    EXC --> KR
+    EXC --> IBIS
+    EXC --> QR
+    KING --> IBIS
+    KING --> QR
+    KR --> QR
+    IBIS --> QR
 
     %% Component styling
     classDef cohort fill:#d1ecf1,stroke:#007bff,stroke-width:2px;
@@ -29,5 +39,5 @@ graph TD
 
     %% Explicit classes
     class GtoB,BAF,BtoP cohort;
-    class MCP,ECD,QC,KING,QR,SNP multicohort;
+    class MCP,ECD,QC,EXC,KING,KR,IBIS,QR,SNP multicohort;
     class P2P1 conditional;

@@ -4,10 +4,9 @@ Job logic for inferring identity-by-descent segments with KING `--ibdseg`.
 
 from __future__ import annotations
 
-from importlib.resources import files
 from typing import TYPE_CHECKING
 
-from cpg_utils.config import config_retrieve, get_driver_image
+from cpg_utils.config import config_retrieve
 from cpg_utils.hail_batch import get_batch
 
 from popgen_genotyping.utils import register_job
@@ -35,35 +34,23 @@ def run_king_ibdseg(
     output_seg_x_path: str,
     output_segments_x_path: str,
     output_log_path: str,
-    bafregress_paths: list[str],
-    smiss_path: str,
-    contamination_max: float,
-    fmiss_max: float,
-    output_excluded_path: str,
+    remove_list_path: str,
     job_name: str = 'king_ibdseg',
 ) -> list[BashJob]:
     """
     Run KING `--ibdseg` on a merged PLINK 1.9 dataset.
 
-    Three jobs are queued, in dependency order:
+    Two jobs are queued, in dependency order:
 
-    1. ``exclusions``: runs ``scripts/relatedness_exclusions.py`` against the BAFRegress
-       output(s) and the merged-cohort ``.smiss`` to select samples whose BAFRegress
-       estimate exceeds ``contamination_max`` or whose per-sample ``F_MISS`` exceeds
-       ``fmiss_max``. Either condition generates thousands of spurious pairwise
-       relationships under KING, which would otherwise contaminate every clean sample's
-       relatedness list. Writes an audit TSV (``IID``, ``REASON``, ``BAF_REGRESS``,
-       ``F_MISS``; header-only when nothing is excluded) to ``output_excluded_path``, and
-       an in-batch plink2 ``--remove`` sample-ID list (``#IID`` header, one IID per line;
-       header-only when nothing is excluded).
-    2. ``recode``: the merged ``.bim`` carries hg38 ``chr``-prefixed contig names
+    1. ``recode``: the merged ``.bim`` carries hg38 ``chr``-prefixed contig names
        (``MergeCohortPlink`` emits ``--output-chr chrM``); KING only parses numeric
        chromosome codes and discards everything else as "other", so a ``chr``-prefixed
        input leaves it with zero autosomal SNPs. This job runs ``plink2 --output-chr 26``
        to recode the fileset to numeric codes (``23``=X, ``24``=Y, ``25``=XY, ``26``=MT)
-       that KING recognises, always passing ``--remove`` with the list from step 1 (a
-       header-only list removes nothing, so no conditional flag is needed).
-    3. ``king``: KING `--ibdseg` against the recoded, exclusion-filtered fileset.
+       that KING recognises. It always passes ``--remove`` with the ``RelatednessExclusions``
+       list of contaminated or poorly-called samples (a header-only list removes nothing,
+       so no conditional flag is needed).
+    2. ``king``: KING `--ibdseg` against the recoded, exclusion-filtered fileset.
 
     KING 2.3.2 writes at the chosen prefix: ``{prefix}.seg`` (autosomal pairwise
     IBD summary), ``{prefix}.segments.gz`` (autosomal per-segment detail) and a
@@ -84,48 +71,16 @@ def run_king_ibdseg(
         output_seg_x_path: Cloud path for the X-chr .seg pairwise summary.
         output_segments_x_path: Cloud path for the X-chr .segments.gz detail.
         output_log_path: Cloud path for the captured KING stdout log.
-        bafregress_paths: Cloud paths to the cohort's BAFRegress output file(s).
-        smiss_path: Cloud path to the merged-cohort PLINK2 ``.smiss``.
-        contamination_max: BAFRegress exclusion threshold (strictly greater than).
-        fmiss_max: Per-sample ``F_MISS`` exclusion threshold (strictly greater than).
-        output_excluded_path: Cloud path for the excluded-samples audit TSV.
+        remove_list_path: Cloud path to the plink2 ``--remove`` list (``#IID`` header, one
+            IID per line) written by ``RelatednessExclusions``.
         job_name: Name for the Hail Batch job.
 
     Returns:
-        The queued jobs in dependency order: ``[exclusions, recode, king]``.
+        The queued jobs in dependency order: ``[recode, king]``.
     """
     b = get_batch()
 
-    # Job 1: select samples to exclude from KING for contamination or missingness.
-    exclusions = register_job(
-        batch=b,
-        job_name=f'{job_name}_exclusions',
-        config_path=['popgen_genotyping', 'king_ibdseg'],
-        image=get_driver_image(),
-        default_cpu=1,
-        default_storage='10G',
-    )
-    script_path = str(files('popgen_genotyping.scripts').joinpath('relatedness_exclusions.py'))
-    script = b.read_input(script_path)
-    bafregress_files = [b.read_input(path) for path in bafregress_paths]
-    bafregress_bash_args = ' '.join(str(f) for f in bafregress_files)
-    smiss_file = b.read_input(smiss_path)
-
-    exclusions.command(
-        f"""
-        set -ex
-        python3 {script} \\
-            --bafregress {bafregress_bash_args} \\
-            --smiss {smiss_file} \\
-            --contamination-max {contamination_max} \\
-            --fmiss-max {fmiss_max} \\
-            --output-tsv {exclusions.excluded_tsv} \\
-            --output-remove-list {exclusions.remove_list}
-        """,
-    )
-    b.write_output(exclusions.excluded_tsv, output_excluded_path)
-
-    # Job 2: recode chromosomes to the numeric codes KING parses, and drop the excluded
+    # Job 1: recode chromosomes to the numeric codes KING parses, and drop the excluded
     # samples in the same pass. plink2 reads the chr-prefixed input natively (plink 1.9
     # would treat each chr-prefixed code as an unmappable extra contig); --output-chr 26
     # emits 1-22, 23=X, 24=Y, 25=XY, 26=MT. --remove is always passed: a header-only list
@@ -139,8 +94,8 @@ def run_king_ibdseg(
         default_cpu=2,
         default_storage='50G',
     )
-    recode.depends_on(exclusions)
     plink_input = b.read_input_group(bed=bed_path, bim=bim_path, fam=fam_path)
+    remove_list = b.read_input(remove_list_path)
     recode.declare_resource_group(
         recoded={
             'bed': '{root}.bed',
@@ -154,12 +109,12 @@ def run_king_ibdseg(
         plink2 --bfile {plink_input} \\
             --allow-extra-chr \\
             --output-chr 26 \\
-            --remove {exclusions.remove_list} \\
+            --remove {remove_list} \\
             --make-bed \\
             --out {recode.recoded}
 
         input_count=$(wc -l < {plink_input.fam})
-        removed_count=$(($(wc -l < {exclusions.remove_list}) - 1))
+        removed_count=$(($(wc -l < {remove_list}) - 1))
         recoded_count=$(wc -l < {recode.recoded.fam})
         expected_count=$((input_count - removed_count))
         if [ "$recoded_count" -ne "$expected_count" ]; then
@@ -169,7 +124,7 @@ def run_king_ibdseg(
         """,
     )
 
-    # Job 3: KING --ibdseg against the recoded, exclusion-filtered fileset.
+    # Job 2: KING --ibdseg against the recoded, exclusion-filtered fileset.
     j = register_job(
         batch=b,
         job_name=job_name,
@@ -224,4 +179,4 @@ def run_king_ibdseg(
     b.write_output(j.king_outputs.segments_gz_x, output_segments_x_path)
     b.write_output(j.king_outputs.log, output_log_path)
 
-    return [exclusions, recode, j]
+    return [recode, j]

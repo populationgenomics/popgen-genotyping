@@ -13,7 +13,17 @@ from popgen_genotyping.run_workflow import (
 from popgen_genotyping.stages import CohortStage
 
 PHASE_1_NAMES = ['GtcToBcfs', 'BafRegress', 'CohortBcfToPlink']
-PHASE_2_NAMES = ['MergeCohortPlink', 'ExportCohortDatasets', 'Plink2Qc', 'KingIbdseg', 'SnpQcReport', 'QcReport']
+PHASE_2_NAMES = [
+    'MergeCohortPlink',
+    'ExportCohortDatasets',
+    'Plink2Qc',
+    'RelatednessExclusions',
+    'KingIbdseg',
+    'KingRobust',
+    'IbisRelatedness',
+    'SnpQcReport',
+    'QcReport',
+]
 
 
 class TestValidatePhaseStageSelection:
