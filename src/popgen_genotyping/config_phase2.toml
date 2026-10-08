@@ -60,13 +60,16 @@ storage = '50G'
 # Samples whose BAFRegress contamination estimate exceeds contamination_max, or whose
 # merged-set per-sample missingness exceeds fmiss_max, are dropped before KING --ibdseg
 # (they generate thousands of spurious relationships) but stay in the QC report, flagged
-# RELATEDNESS_EXCLUDED with the reason. Both thresholds are strict (>). Values agreed in
+# RELATEDNESS_EXCLUDED with the reason. Both thresholds are strict (>).
+# BAFRegress is on the scale of the contaminating fraction; 0.03 = 3%. Agreed in
 # #popgen-analysis on 2026-04-10 for OurDNA array sample selection.
-# BAFRegress is on the scale of the contaminating fraction; 0.03 = 3%.
 contamination_max = 0.03
-# Per-sample F_MISS (1 - call rate) from Plink2Qc's .smiss; 0.01 = call rate below 99%.
-# Same name as the per-variant snp_qc_report.thresholds.fmiss_max, but applied to samples.
-fmiss_max = 0.01
+# Per-sample F_MISS (1 - call rate) from Plink2Qc's .smiss; 0.02 = call rate below 98%.
+# Same name and value as the per-variant snp_qc_report.thresholds.fmiss_max, but applied to
+# samples. Raised from 0.01 in October 2026: 0.01 dropped clean samples (BAFRegress <= 0,
+# F_MISS 0.0106-0.0132 in COH16191), while the samples that inflated relatedness in COH15003
+# had F_MISS >= 0.047.
+fmiss_max = 0.02
 
 [popgen_genotyping.snp_qc_report]
 cpu = 2
