@@ -3,10 +3,12 @@
 import csv
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
 
+from popgen_genotyping.jobs.relatedness_exclusions_job import run_relatedness_exclusions
 from popgen_genotyping.scripts.relatedness_exclusions import (
     main,
     read_bafregress,
@@ -253,3 +255,64 @@ class TestEndToEnd:
         assert rows == []
 
         assert Path(output_remove_list).read_text() == '#IID\n'
+
+
+# -- run_relatedness_exclusions job wiring -----------------------------------------
+
+
+class TestRunRelatednessExclusionsJob:
+    """The job runs the script once and writes both outputs, whichever estimator consumes them."""
+
+    def _queue(self) -> tuple[MagicMock, MagicMock, MagicMock]:
+        """Queue the job with mocked Hail Batch; return the batch, the job and the register_job mock."""
+        mock_batch = MagicMock()
+        # Echo each staged path back so the command can be asserted on file names.
+        mock_batch.read_input.side_effect = lambda path: path
+        mock_job = MagicMock()
+        mock_job.excluded_tsv = 'EXCLUDED_TSV'
+        mock_job.remove_list = 'REMOVE_LIST'
+
+        with (
+            patch('popgen_genotyping.jobs.relatedness_exclusions_job.get_batch', return_value=mock_batch),
+            patch('popgen_genotyping.jobs.relatedness_exclusions_job.get_driver_image', return_value='driver:latest'),
+            patch(
+                'popgen_genotyping.jobs.relatedness_exclusions_job.register_job', return_value=mock_job
+            ) as mock_register,
+        ):
+            returned = run_relatedness_exclusions(
+                bafregress_paths=['gs://baf/COHP1.BAFRegress.txt', 'gs://baf/COHP2.BAFRegress.txt'],
+                smiss_path='gs://qc/cohort.smiss',
+                contamination_max=0.03,
+                fmiss_max=0.02,
+                output_excluded_path='gs://o/excluded.tsv',
+                output_remove_list_path='gs://o/remove.txt',
+                job_name='RelatednessExclusions_cohort',
+            )
+        assert returned is mock_job
+        return mock_batch, mock_job, mock_register
+
+    def test_job_runs_in_driver_image_under_its_own_config_section(self) -> None:
+        """Resources come from [popgen_genotyping.relatedness_exclusions]; the script needs only pandas."""
+        _batch, _job, mock_register = self._queue()
+        kwargs = mock_register.call_args.kwargs
+        assert kwargs['config_path'] == ['popgen_genotyping', 'relatedness_exclusions']
+        assert kwargs['image'] == 'driver:latest'
+        assert kwargs['job_name'] == 'RelatednessExclusions_cohort'
+
+    def test_command_invokes_script_with_every_threshold_and_input(self) -> None:
+        """The command runs relatedness_exclusions.py with all BAFRegress files, .smiss and thresholds."""
+        _batch, job, _register = self._queue()
+        cmd: str = job.command.call_args[0][0]
+        assert 'relatedness_exclusions.py' in cmd
+        assert '--bafregress gs://baf/COHP1.BAFRegress.txt gs://baf/COHP2.BAFRegress.txt' in cmd
+        assert '--smiss gs://qc/cohort.smiss' in cmd
+        assert '--contamination-max 0.03' in cmd
+        assert '--fmiss-max 0.02' in cmd
+        assert '--output-tsv EXCLUDED_TSV' in cmd
+        assert '--output-remove-list REMOVE_LIST' in cmd
+
+    def test_both_outputs_are_written_to_their_cloud_paths(self) -> None:
+        """The audit TSV and the plink2 --remove list each go to their own cloud path."""
+        batch, _job, _register = self._queue()
+        written = {call.args for call in batch.write_output.call_args_list}
+        assert written == {('EXCLUDED_TSV', 'gs://o/excluded.tsv'), ('REMOVE_LIST', 'gs://o/remove.txt')}

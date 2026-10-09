@@ -1,11 +1,12 @@
-"""Select samples to exclude from KING --ibdseg for contamination or high missingness.
+"""Select samples to exclude from relatedness estimation for contamination or high missingness.
 
 A contaminated sample's genotype noise, or a sample with unusually high per-sample
 missingness, generates thousands of spurious pairwise relationships under KING
-`--ibdseg`, which in turn contaminate every clean sample's relatedness list. This
-script reads BAFRegress output and PLINK2 `.smiss` per-sample missingness, selects
-the samples that exceed either configured threshold, and writes both an audit TSV
-(IID, REASON, BAF_REGRESS, F_MISS) and a plink2 `--remove` sample-ID list.
+`--ibdseg`, KING-robust and IBIS, which in turn contaminate every clean sample's
+relatedness list. This script reads BAFRegress output and PLINK2 `.smiss` per-sample
+missingness, selects the samples that exceed either configured threshold, and writes both
+an audit TSV (IID, REASON, BAF_REGRESS, F_MISS) and a plink2 `--remove` sample-ID list that
+every estimator removes before it runs.
 """
 
 import argparse
@@ -73,7 +74,7 @@ def select_excluded_samples(
     contamination_max: float,
     fmiss_max: float,
 ) -> pd.DataFrame:
-    """Select samples to exclude from KING `--ibdseg` for contamination or missingness.
+    """Select samples to exclude from relatedness estimation for contamination or missingness.
 
     The ``.smiss`` sample set defines the required universe: every merged-cohort
     sample must have a BAFRegress estimate, since ``.smiss`` is computed on the
@@ -132,7 +133,7 @@ def main() -> None:
     """Parse arguments, select excluded samples, and write the TSV + remove-list."""
     parser = argparse.ArgumentParser(
         description=(
-            'Select samples to exclude from KING --ibdseg for BAFRegress contamination or '
+            'Select samples to exclude from relatedness estimation for BAFRegress contamination or '
             'high per-sample missingness, and write an audit TSV plus a plink2 --remove list.'
         ),
     )
@@ -165,7 +166,7 @@ def main() -> None:
     contamination_count = sum(CONTAMINATION_REASON in reason for reason in excluded['REASON'])
     missingness_count = sum(MISSINGNESS_REASON in reason for reason in excluded['REASON'])
     print(
-        f'Excluded {len(excluded)} sample(s) from KING --ibdseg: '
+        f'Excluded {len(excluded)} sample(s) from relatedness estimation: '
         f'{contamination_count} for contamination, {missingness_count} for missingness.',
     )
 

@@ -14,10 +14,13 @@ from popgen_genotyping.stages import (
     CohortBcfToPlink,
     ExportCohortDatasets,
     GtcToBcfs,
+    IbisRelatedness,
     KingIbdseg,
+    KingRobust,
     MergeCohortPlink,
     Plink2Qc,
     QcReport,
+    RelatednessExclusions,
     SnpQcReport,
 )
 
@@ -26,7 +29,17 @@ from popgen_genotyping.stages import (
 # created super cohort. Every stage is a CohortStage, so nothing in the stage graph
 # separates them — the split below is what validate_phase_stage_selection enforces.
 PHASE_1_STAGES: list = [GtcToBcfs, BafRegress, CohortBcfToPlink]
-PHASE_2_STAGES: list = [MergeCohortPlink, ExportCohortDatasets, Plink2Qc, KingIbdseg, SnpQcReport, QcReport]
+PHASE_2_STAGES: list = [
+    MergeCohortPlink,
+    ExportCohortDatasets,
+    Plink2Qc,
+    RelatednessExclusions,
+    KingIbdseg,
+    KingRobust,
+    IbisRelatedness,
+    SnpQcReport,
+    QcReport,
+]
 
 
 def validate_phase_stage_selection(only_stages: list[str], input_cohorts: list[str]) -> None:
